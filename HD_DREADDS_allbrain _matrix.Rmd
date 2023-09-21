@@ -1,0 +1,787 @@
+---
+title: '[MACAQUE] rs-fMRI DREADS HoDo'
+author: "E Procyk"
+date: "20/06/2023"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library('plotrix')
+library('plot.matrix')
+library(corrplot)
+library(ggplot2)
+library(psych)
+library(RColorBrewer)
+library(gplots)
+library(reshape2)
+library(MASS)
+#library("ppcor")
+library(plyr)
+library(dplyr)
+library(Rmisc)
+library("stats")
+library("lsmeans")
+library(multcompView)
+library(multcomp)
+library(lme4)
+library(lmerTest)
+library(pbkrtest)
+library(forcats)
+#library('fmsb') 
+#library('ggradar')
+library('dbplyr')
+library('emmeans')
+#library("ggnewscale")
+#library("report")
+library(rstatix)
+#function
+
+#recode number to character in the list = create a function call recode2
+recode2 <- function ( data, fields, recodes ) {
+  for ( i in which(names(data) %in% fields) ) { # iterate over column indexes that are present in the passed dataframe that are also included in the fields list
+    data[,i] <- car::recode( data[,i], recodes)
+  }
+  data
+}
+
+
+regenerate = FALSE
+
+
+pathout <- "C://Users/E Procyk/Dropbox/Main_drop/R/MRI/CMAs_RSN/CMAr DREADDs/"
+session_type <- read.table(paste0(pathout,"DCZInjectionSchedule.txt"), header=TRUE)
+
+session_type$period <- as.factor(session_type$period)
+session_type$monkey <- as.factor(session_type$monkey)
+session_type$injection <- as.factor(session_type$injection)
+session_type$session <- as.factor(session_type$session)
+
+```
+
+## ABOUT:
+This is reorganized from Camille Giacometti's script used for the RSN study with TUS
+
+[[ this pdf document display the generated plots for the following:
+
+Data are acquired on 3T MRI in anaesthetized macaque monkeys (n=5, 1M, 4F). Data are splitted in a SHAM condition (no stimulation) and a TUS AMG condition (transcranial ultrason stimulation of the bilateral amygdala). SHAM condition is composed by 1 single run and TUS condition by 2 runs. Each of the runs in each conditions is also separated in 6 differents group of volumes (=TR) size by sequence of 400: 400TR, 800TR, 1200TR, 1600TR, 2000TR and 2400TR (note that CELIA SHAM Session LOKI TUSAMG Session RUN2 have a total on 2000 TR only). 
+
+The functional connectivity (i.e. correlation strength) pattern at rest between **4 AMYGDALA main nuclei (LA, BL, BM and Ce)** and **16 medial Prefrontal cortex ROIs (Area25,SROSp, SROSm, SROSa, Fork32, CgS11, CgS10, CgS9, CgS8, CgS7, CgS6, CgS5, CgS4, CgS3, CgS2, CgS1)** was assed for each of the different conditions, runs, volumes and hemisphere. ]]
+
+
+
+```{r warning=FALSE, message = FALSE, include=FALSE}
+
+
+# load CHAMR atlas key
+CHARM <- read.table('E:/DREADDS/CHARM-SARM_ATLAS_SPACE/CHARM_ATLAS/CHARM_key_6.txt', header=TRUE)
+CHARM <- CHARM[-c(79, 80,81, 82, 83, 86), ]
+
+#set up environnement and folder
+path <- 'E:/DREADDS/CHARM-SARM_ATLAS_SPACE/' 
+
+# monkey list c('HOMER','DONUT','KATE', 'OSCAR','POPEYE','YURI','LOKI','NALA')
+mkey <- c('HOMER','DONUT')
+
+hemisph <- c('LH','RH')
+
+sessionMax <- 8
+
+# this step is to load 1D files and put them into matrix txt files that then will connect with Camille's script
+#if (regenerate){
+  
+ if (regenerate){
+  
+  for (mk in 1:length(mkey)){
+
+    for (session in 1:sessionMax){
+      for (hem in 1:2){
+        
+        #Folder and path 
+          setwd(paste0("E://DREADDS/CHARM-SARM_ATLAS_SPACE/",mkey[mk],"/",mkey[mk],"_",session,"/CHARM_ATLAS_ROI/",hemisph[hem]))
+          folder2 = paste0("E:/DREADDS/CHARM-SARM_ATLAS_SPACE/",mkey[mk],"/",mkey[mk],"_",session,"/CHARM_ATLAS_ROI/",hemisph[hem])
+       
+          for (ran in 1:5){ # will import 1D files and turn into matrix, save in .txt file
+          
+        #import files for 1 monkey, 1 run, 1 hemisphere and rename variables
+          filelist <- list.files(path=folder2, pattern=paste0("RUN",ran), full.names = F) 
+          filelist <- as.list(filelist)
+          dataLH <- sapply(filelist, read.table, header = F, simplify = FALSE)
+         
+           for (ii in 1:length(CHARM[,1])){   
+             indx <- grep(paste0("_",CHARM$Index[ii],"_"),filelist)
+             colnames(dataLH[[indx]]) <- CHARM$Abbreviation[ii]
+           }
+          
+           dat.list <- bind_cols(dataLH)
+           write.table(dat.list, paste0("E:/DREADDS/CHARM-SARM_ATLAS_SPACE/",mkey[mk],"/ALLBRAINCOR/","Frame_",mkey[mk],"_",session,"_",hemisph[hem],"_RUN",ran,".txt"), append = FALSE, sep = " ", dec = ".",  row.names = FALSE, col.names = TRUE)
+          }
+      }
+    }
+  }
+               
+}
+
+
+
+
+
+```
+
+## **DIRTY path to Matrices**
+
+```{r homer, warning=FALSE, message = FALSE, echo=FALSE, fig.ncol = 2}
+library(reshape2)
+library(ggplot2)
+library(Morpho)
+
+setwd("E:/DREADDS/CHARM-SARM_ATLAS_SPACE/HOMER/ALLBRAINCOR/")
+folder3 = "E:/DREADDS/CHARM-SARM_ATLAS_SPACE/HOMER/ALLBRAINCOR/"
+filelistmatHo <- list.files(path=folder3, pattern=".txt", full.names = F) 
+filelistmatHo <- as.list(filelistmatHo)
+
+MAIN.HOL.mat <- array()
+MAIN.HOR.mat <- array()
+
+
+MAIN.HO <- data.frame()
+session <- 2
+
+
+for (hofile in seq(11, 80, by=10)){
+  
+  #------------Homer Session LH
+  dat.Ho1 <-  fisherz(cor(read.table(paste0(folder3,filelistmatHo[hofile]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Ho2 <-  fisherz(cor(read.table(paste0(folder3,filelistmatHo[hofile+1]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Ho3 <-  fisherz(cor(read.table(paste0(folder3,filelistmatHo[hofile+2]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Ho4 <-  fisherz(cor(read.table(paste0(folder3,filelistmatHo[hofile+3]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Ho5 <- fisherz( cor(read.table(paste0(folder3,filelistmatHo[hofile+4]), header=TRUE),  use="all.obs", method="pearson"))
+  
+  my.list <- list(dat.Ho1, dat.Ho2, dat.Ho3, dat.Ho4, dat.Ho5)
+  
+  MAIN.HOL.mat <- cbind(MAIN.HOL.mat, array(my.list, dim= c(1,1,5))) #stack all matrices in one array
+  
+  listMeanLH <- apply(simplify2array(my.list), 1:2, mean)
+  listsdLH <- apply(simplify2array(my.list), 1:2, sd)
+  
+  # reshape to transform into dataframe
+  m_HOLH<-melt(listMeanLH)
+  m_HOLH<-data.frame(m_HOLH[!is.na(m_HOLH[,3]),]) # get rid of the NA matrix entries
+  m_HOLH$value_lab<-sprintf('%.2f',m_HOLH$value)
+  m_HOLH$session <- session
+  m_HOLH$hem <- "LH"
+  
+   #------------Homer Session RH
+  dat.Ho1 <-  fisherz(cor(read.table(paste0(folder3,filelistmatHo[hofile]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Ho2 <-  fisherz(cor(read.table(paste0(folder3,filelistmatHo[hofile+5]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Ho3 <-  fisherz(cor(read.table(paste0(folder3,filelistmatHo[hofile+6]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Ho4 <-  fisherz(cor(read.table(paste0(folder3,filelistmatHo[hofile+7]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Ho5 <-  fisherz(cor(read.table(paste0(folder3,filelistmatHo[hofile+8]), header=TRUE),  use="all.obs", method="pearson"))
+  
+  my.list <- list(dat.Ho1, dat.Ho2, dat.Ho3, dat.Ho4, dat.Ho5)
+  
+    MAIN.HOR.mat <- cbind(MAIN.HOR.mat, array(my.list, dim= c(1,1,5))) #stack all matrices in one array
+  
+  listMeanRH <- apply(simplify2array(my.list), 1:2, mean)
+  listsdRH <- apply(simplify2array(my.list), 1:2, sd)
+  
+  # reshape to transform into dataframe
+  m_HORH<-melt(listMeanRH)
+  m_HORH<-data.frame(m_HORH[!is.na(m_HORH[,3]),]) # get rid of the NA matrix entries
+  m_HORH$value_lab<-sprintf('%.2f',m_HORH$value)
+  m_HORH$session <- session
+  m_HORH$hem <- "RH"
+  
+  
+  MAIN.HO <- rbind(MAIN.HO, m_HOLH, m_HORH)
+  session <- session + 1
+  
+}
+
+
+MAIN.HO$injection <- MAIN.HO$session
+
+#
+
+for (i in 1:8){
+MAIN.HO$injection[MAIN.HO$session==i ] <- as.factor(session_type$injection[session_type$monkey=="HOMER" & session_type$session==i])
+}
+
+
+
+MAIN.HO$injection <- as.factor(MAIN.HO$injection)
+levels(MAIN.HO$injection) <- levels(session_type$injection)
+
+MAIN.HO$period <- MAIN.HO$session
+MAIN.HO$period[MAIN.HO$session<5] <- "pre"
+MAIN.HO$period[MAIN.HO$session>4] <- "post"
+MAIN.HO$period <- as.factor(MAIN.HO$period)
+
+
+ggplot(subset(MAIN.HO, session >4), aes(Var2, Var1, fill = value, label=value_lab)) + 
+  geom_tile() + 
+  facet_wrap(hem~injection)+
+  scale_fill_gradient2(low="blue",mid="white", high="red", midpoint = 0) +
+  ggtitle("Homer - post-transfection sessions")+
+  theme(axis.text=element_text(size=5),axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ggplot( MAIN.HO , aes(value, fill=as.factor(injection))) + 
+  geom_histogram(position="identity", binwidth=.05, alpha=.5) + 
+  facet_wrap(period~hem)+
+  scale_fill_manual(values=c("grey60","darkred")) +
+  ggtitle("Homer - all  sessions")
+
+
+ggplot(MAIN.HO, aes(Var2, Var1, fill = value, label=value_lab)) + 
+  geom_tile() + 
+  facet_wrap(period~hem*injection, nrow = 2)+
+  scale_fill_gradient2(low="blue",mid="white", high="red", midpoint = 0) +
+  ggtitle("Homer - all sessions")+
+  theme(axis.text=element_text(size=5),axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+# look at difference for session post chir  ATTENTION 11/9/2023 test without HOmer session 5 -post/control-
+injecHO.mat <- aggregate(value ~ hem + injection + Var1 + Var2, data=subset(MAIN.HO, session>5), mean) #ATTENTION 11/9/2023 test without HOmer session 5 -post/control-
+
+#------------------HOMER
+injecHO.mat.CONT<- subset(injecHO.mat, injection=="Control")
+injecHO.mat.DCZ<- subset(injecHO.mat, injection=="DCZ")
+injecHO.mat.diff <- injecHO.mat.DCZ
+injecHO.mat.diff$value <- injecHO.mat.DCZ$value - injecHO.mat.CONT$value
+
+ggplot(injecHO.mat.diff, aes(Var2, Var1, fill = value)) + 
+  geom_tile() + 
+  facet_wrap(hem~.)+
+  scale_fill_gradient2(low="blue",mid="yellow", high="red", midpoint = 0, limits = c(-0.5, 0.5)) +
+  ggtitle("Homer - post-transfection sessions DCZ-CONTROL")+
+  theme(axis.text=element_text(size=5),axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+
+# look at difference for session pre chir
+injecHOp.mat <- aggregate(value ~ hem + injection + Var1 + Var2, data=subset(MAIN.HO, session<5), mean)
+
+injecHOp.mat.CONT<- subset(injecHOp.mat, injection=="Control")
+injecHOp.mat.DCZ<- subset(injecHOp.mat, injection=="DCZ")
+injecHOp.mat.diff <- injecHOp.mat.DCZ
+injecHOp.mat.diff$value <- injecHOp.mat.DCZ$value - injecHOp.mat.CONT$value
+
+ggplot(injecHOp.mat.diff, aes(Var2, Var1, fill = value)) + 
+  geom_tile() + 
+  facet_wrap(hem~.)+
+  scale_fill_gradient2(low="blue",mid="yellow", high="red", midpoint = 0, limits = c(-0.5, 0.5)) +
+  ggtitle("Homer - pre-transfection sessions DCZ-CONTROL")+
+  theme(axis.text=element_text(size=5),axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+
+
+```
+
+#DONUT
+```{r donut, warning=FALSE, message = FALSE, echo=FALSE, fig.ncol = 2}
+library(reshape2)
+library(ggplot2)
+
+setwd("E:/DREADDS/CHARM-SARM_ATLAS_SPACE/DONUT/ALLBRAINCOR/")
+folder3 = "E:/DREADDS/CHARM-SARM_ATLAS_SPACE/DONUT/ALLBRAINCOR/"
+filelistmatDo <- list.files(path=folder3, pattern=".txt", full.names = F) 
+filelistmatDo <- as.list(filelistmatDo)
+
+
+MAIN.DOL.mat <- array()
+MAIN.DOR.mat <- array()
+
+MAIN.DO <- data.frame()
+session <- 1
+
+for (Dofile in seq(1, 80, by=10)){
+  
+  #------------Do Session LH
+  dat.Do1 <-  fisherz(cor(read.table(paste0(folder3,filelistmatDo[Dofile]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Do2 <-  fisherz(cor(read.table(paste0(folder3,filelistmatDo[Dofile+1]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Do3 <-  fisherz(cor(read.table(paste0(folder3,filelistmatDo[Dofile+2]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Do4 <-  fisherz(cor(read.table(paste0(folder3,filelistmatDo[Dofile+3]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Do5 <- fisherz( cor(read.table(paste0(folder3,filelistmatDo[Dofile+4]), header=TRUE),  use="all.obs", method="pearson"))
+  
+  my.list <- list(dat.Do1, dat.Do2, dat.Do3, dat.Do4, dat.Do5)
+    MAIN.DOL.mat <- cbind(MAIN.DOL.mat, array(my.list, dim= c(1,1,5))) #stack all matrices in one array
+  
+  listMeanLH <- apply(simplify2array(my.list), 1:2, mean)
+  listsdLH <- apply(simplify2array(my.list), 1:2, sd)
+  
+  # reshape to transform into dataframe
+  m_DOLH<-melt(listMeanLH)
+  m_DOLH<-data.frame(m_DOLH[!is.na(m_DOLH[,3]),]) # get rid of the NA matrix entries
+  m_DOLH$value_lab<-sprintf('%.2f',m_DOLH$value)
+  m_DOLH$session <- session
+  m_DOLH$hem <- "LH"
+  
+   #------------Donut Session RH
+  dat.Do1 <-  fisherz(cor(read.table(paste0(folder3,filelistmatDo[Dofile]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Do2 <-  fisherz(cor(read.table(paste0(folder3,filelistmatDo[Dofile+5]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Do3 <-  fisherz(cor(read.table(paste0(folder3,filelistmatDo[Dofile+6]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Do4 <-  fisherz(cor(read.table(paste0(folder3,filelistmatDo[Dofile+7]), header=TRUE),  use="all.obs", method="pearson"))
+  dat.Do5 <- fisherz( cor(read.table(paste0(folder3,filelistmatDo[Dofile+8]), header=TRUE),  use="all.obs", method="pearson"))
+  
+  my.list <- list(dat.Do1, dat.Do2, dat.Do3, dat.Do4, dat.Do5)
+   MAIN.DOL.mat <- cbind(MAIN.DOL.mat, array(my.list, dim= c(1,1,5))) #stack all matrices in one array
+   
+  listMeanRH <- apply(simplify2array(my.list), 1:2, mean)
+  listsdRH <- apply(simplify2array(my.list), 1:2, sd)
+  
+  # reshape to transform into dataframe
+  m_DORH<-melt(listMeanRH)
+  m_DORH<-data.frame(m_DORH[!is.na(m_DORH[,3]),]) # get rid of the NA matrix entries
+  m_DORH$value_lab<-sprintf('%.2f',m_DORH$value)
+  m_DORH$session <- session
+  m_DORH$hem <- "RH"
+  
+  
+  MAIN.DO <- rbind(MAIN.DO, m_DOLH, m_DORH)
+  session <- session + 1
+  
+}
+
+
+MAIN.DO$injection <- MAIN.DO$session
+
+for (i in 1:8){
+MAIN.DO$injection[MAIN.DO$session==i ] <- as.factor(session_type$injection[session_type$monkey=="DONUT" & session_type$session==i])
+}
+MAIN.DO$injection <- as.factor(MAIN.DO$injection)
+levels(MAIN.DO$injection) <- levels(session_type$injection)
+
+MAIN.DO$period <- MAIN.DO$session
+MAIN.DO$period[MAIN.DO$session<5] <- "pre"
+MAIN.DO$period[MAIN.DO$session>4] <- "post"
+MAIN.DO$period <- as.factor(MAIN.DO$period)
+
+
+ggplot(subset(MAIN.DO, session >4), aes(Var2, Var1, fill = value, label=value_lab)) + 
+  geom_tile() + 
+  facet_wrap(hem~injection)+
+  scale_fill_gradient2(low="blue",mid="white", high="red", midpoint = 0) +
+  ggtitle("Donut - post-transfection sessions")+
+  theme(axis.text=element_text(size=5),axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ggplot( MAIN.DO , aes(value, fill=as.factor(injection))) + 
+  geom_histogram(position="identity", binwidth=.05, alpha=.5) + 
+  facet_wrap(period~hem)+
+  scale_fill_manual(values=c("grey60","darkred")) +
+  ggtitle("Donut - all  sessions")
+
+
+
+#--------------------DONUT
+
+# look at difference for session pre chir
+injecDOp.mat <- aggregate(value ~ hem + injection + Var1 + Var2, data=subset(MAIN.DO, session<5), mean)
+
+injecDOp.mat.CONT<- subset(injecDOp.mat, injection=="Control")
+injecDOp.mat.DCZ<- subset(injecDOp.mat, injection=="DCZ")
+injecDOp.mat.diff <- injecDOp.mat.DCZ
+injecDOp.mat.diff$value <- injecDOp.mat.DCZ$value - injecDOp.mat.CONT$value
+
+ggplot(injecDOp.mat.diff, aes(Var2, Var1, fill = value)) + 
+  geom_tile() + 
+  facet_wrap(hem~.)+
+  scale_fill_gradient2(low="dodgerblue",mid="yellow", high="darkred", midpoint = 0, limits = c(-0.5, 0.5)) +
+  ggtitle("Donut - pre-transfection sessions DCZ-CONTROL")+
+  theme(axis.text=element_text(size=5),axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+# look at difference for session post chir
+injecDO.mat <- aggregate(value ~ hem + injection + Var1 + Var2, data=subset(MAIN.DO, session>4), mean)
+
+injecDO.mat.CONT<- subset(injecDO.mat, injection=="Control")
+injecDO.mat.DCZ<- subset(injecDO.mat, injection=="DCZ")
+injecDO.mat.diff <- injecDO.mat.DCZ
+injecDO.mat.diff$value <- injecDO.mat.DCZ$value - injecDO.mat.CONT$value
+
+ggplot(injecDO.mat.diff, aes(Var2, Var1, fill = value)) + 
+  geom_tile() + 
+  facet_wrap(hem~.)+
+  scale_fill_gradient2(low="blue",mid="yellow", high="red", midpoint = 0, limits = c(-0.5, 0.5)) +
+  ggtitle("DONUT - post-transfection sessions DCZ-CONTROL")+
+  theme(axis.text=element_text(size=5),axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+```
+
+
+
+
+#Identify regions
+
+```{r regions, warning=FALSE, message = FALSE, echo=FALSE}
+
+MAIN.HO$region1 <- fct_collapse( MAIN.HO$Var1, Frontal = CHARM$Abbreviation[1:50], Autre = CHARM$Abbreviation[51:133])
+
+MAIN.HO$region2 <- fct_collapse( MAIN.HO$Var2, Frontal = CHARM$Abbreviation[1:50], Autre = CHARM$Abbreviation[51:133])
+
+frontHO <- subset(MAIN.HO, region1=="Frontal" & region2=="Frontal")
+
+injecFrontHO.mat <- aggregate(value ~ hem + injection + Var1 + Var2, data=subset(frontHO, session>4), mean)
+injecFrontHO.mat$Var1 <- as.character(injecFrontHO.mat$Var1)
+injecFrontHO.mat$Var1 <- as.factor(injecFrontHO.mat$Var1)
+
+
+injecFrontHO.mat$Var2 <- as.character(injecFrontHO.mat$Var2)
+injecFrontHO.mat$Var2 <- as.factor(injecFrontHO.mat$Var2)
+
+
+# DONUT
+MAIN.DO$region1 <- fct_collapse( MAIN.DO$Var1, Frontal = CHARM$Abbreviation[1:50], Autre = CHARM$Abbreviation[51:133])
+
+MAIN.DO$region2 <- fct_collapse( MAIN.DO$Var2, Frontal = CHARM$Abbreviation[1:50], Autre = CHARM$Abbreviation[51:133])
+
+frontDO <- subset(MAIN.DO, region1=="Frontal" & region2=="Frontal")
+
+injecFrontDO.mat <- aggregate(value ~ hem + injection + Var1 + Var2, data=subset(frontDO, session>4), mean)
+injecFrontDO.mat$Var1 <- as.character(injecFrontDO.mat$Var1)
+injecFrontDO.mat$Var1 <- as.factor(injecFrontDO.mat$Var1)
+
+
+injecFrontDO.mat$Var2 <- as.character(injecFrontDO.mat$Var2)
+injecFrontDO.mat$Var2 <- as.factor(injecFrontDO.mat$Var2)
+
+
+
+```
+
+
+
+
+
+#make Heatmaps
+```{r heatm, warning=FALSE, message = FALSE, echo=FALSE}
+
+make_a_map <- function(xx, titl){
+  xxp <- as.matrix(xx)
+
+  rd<-dist(xxp)
+  rc<-hclust(rd)
+  
+  cd<-dist(t(xxp)) # transpose of xxp to have it in the good direction
+  cc<-hclust(cd)
+
+  par(cex.main=0.5)
+  my_palette <- colorRampPalette(c("dodgerblue4", "white", "darkred"))(n = 150)
+  heatmap.2(xxp, 
+          Rowv=as.dendrogram(rc),
+          Colv=as.dendrogram(cc),
+          scale="column", 
+          col= my_palette,
+          main=titl,
+          ylab="x", 
+          xlab="y",
+          cexCol=.6, cexRow = .6,
+          na.rm=TRUE,
+          trace="none")
+  
+}
+
+## HOMER
+#PRE CHIR
+Hocontp <- xtabs(value ~ Var1 + Var2, subset(injecHOp.mat, hem =="RH" & injection == "Control" & value !=Inf))
+make_a_map(Hocontp,"Homer RH Control - PRE")
+
+Hoinjp <- xtabs(value ~ Var1 + Var2, subset(injecHOp.mat, hem =="RH" & injection == "DCZ" & value !=Inf))
+make_a_map(Hoinjp,"Homer RH DCZ - PRE")
+
+
+#POST CHIR
+Hocont <- xtabs(value ~ Var1 + Var2, subset(injecHO.mat, hem =="RH" & injection == "Control" & value !=Inf))
+make_a_map(Hocont,"Homer RH Control - POST")
+
+Hoinj <- xtabs(value ~ Var1 + Var2, subset(injecHO.mat, hem =="RH" & injection == "DCZ" & value !=Inf))
+make_a_map(Hoinj,"Homer LH DCZ - POST")
+
+#frontal
+
+
+
+HoFRcont <- xtabs(value ~ Var1 + Var2, subset(injecFrontHO.mat, hem =="RH" & injection == "Control" & value !=Inf))
+make_a_map(HoFRcont,"Homer RH Control - POST")
+
+HoFRinj <- xtabs(value ~ Var1 + Var2, subset(injecFrontHO.mat, hem =="RH" & injection == "DCZ" & value !=Inf))
+make_a_map(HoFRinj,"Homer RH DCZ - POST")
+
+
+
+
+
+# now lets order DCZ with the order of Control
+
+ xxp <- as.matrix(HoFRcont)
+  rd<-dist(xxp)
+  rc<-hclust(rd)
+  cd<-dist(t(xxp))
+  cc<-hclust(cd)
+
+ xxp2 <- as.matrix(HoFRinj)
+titl = "Homer Frontal RH DCZ as Control - POST"
+  
+  par(cex.main=0.5)
+  my_palette <- colorRampPalette(c("dodgerblue4", "white", "darkred"))(n = 150)
+  heatmap.2(xxp2, 
+          Rowv=as.dendrogram(rc),
+          Colv=as.dendrogram(cc),
+          scale="column", 
+          col= my_palette,
+          main=titl,
+          ylab="x", 
+          xlab="y",
+          cexCol=.6, cexRow = .6,
+          na.rm=TRUE,
+          trace="none")
+  
+  
+  dev.off()
+  
+
+
+## DONUT
+
+#PRE CHIR
+Docontp <- xtabs(value ~ Var1 + Var2, subset(injecDOp.mat, hem =="LH" & injection == "Control" & value !=Inf))
+make_a_map(Docontp,"Donut LH Control - PRE")
+
+Doinjp <- xtabs(value ~ Var1 + Var2, subset(injecDOp.mat, hem =="LH" & injection == "DCZ" & value !=Inf))
+make_a_map(Doinjp,"Donut LH DCZ - PRE")
+
+
+#POST CHIR
+Docont <- xtabs(value ~ Var1 + Var2, subset(injecDO.mat, hem =="LH" & injection == "Control" & value !=Inf))
+make_a_map(Docont,"Donut LH Control - POST")
+
+Doinj <- xtabs(value ~ Var1 + Var2, subset(injecDO.mat, hem =="LH" & injection == "DCZ" & value !=Inf))
+make_a_map(Doinj,"Donut LH DCZ - POST")
+
+#frontal
+
+DoFRcont <- xtabs(value ~ Var1 + Var2, subset(injecFrontDO.mat, hem =="LH" & injection == "Control" & value !=Inf))
+make_a_map(DoFRcont,"Homer LH Control - POST")
+
+DoFRinj <- xtabs(value ~ Var1 + Var2, subset(injecFrontDO.mat, hem =="LH" & injection == "DCZ" & value !=Inf))
+make_a_map(DoFRinj,"Homer LH DCZ - POST")
+
+# now lets order Frontal DCZ with the order of Control
+
+ xxp <- as.matrix(DoFRcont)
+  rd<-dist(xxp)
+  rc<-hclust(rd)
+  cd<-dist(t(xxp))
+  cc<-hclust(cd)
+
+ xxp2 <- as.matrix(DoFRinj)
+titl = "DOnut LH DCZ as Control - POST"
+
+diffxxp <- xxp2 - xxp
+  
+  par(cex.main=0.5)
+  my_palette <- colorRampPalette(c("dodgerblue4", "white", "darkred"))(n = 150)
+  heatmap.2(diffxxp, 
+          Rowv=as.dendrogram(rc),
+          Colv=as.dendrogram(cc),
+          scale="column", 
+          col= my_palette,
+          main=titl,
+          ylab="x", 
+          xlab="y",
+          cexCol=.6, cexRow = .6,
+          na.rm=TRUE,
+          trace="none")
+  dev.off()
+  
+  
+##----  
+
+ # Create the dataframe to correlate Z control and z DCZ
+  
+  
+VectData <- data.frame( "Z_control"=c(Docontp),"Z_DCZ"=  c(Doinjp), "ROI_cont"= cc$labels, "period"="pre", singe="Donut")
+
+  VectData <- rbind(VectData, data.frame("Z_control"= c(Hocontp), "Z_DCZ"= c(Hoinjp), "ROI_cont"= cc$labels, "period"="pre", singe="Homer") )
+  
+VectData <- rbind(VectData,data.frame("Z_control"= c(Docont), "Z_DCZ"= c(Doinj), "ROI_cont"= cc$labels, "period"="post", singe="Donut") )
+
+
+VectData <- rbind(VectData, data.frame("Z_control"= c(Hocont), "Z_DCZ"= c(Hoinj), "ROI_cont"= cc$labels, "period"="post", singe="Homer") )
+
+
+
+#figures and stats
+  ggplot(VectData, aes(x= Z_control, y= Z_DCZ, colour=period))+
+    geom_point()+
+    geom_smooth(method='lm', colour="blue")+
+    facet_grid(singe~period)+
+    scale_colour_manual(values=c("red","grey60"))+
+    geom_hline(yintercept = 0)+ geom_vline(xintercept = 0)+
+    geom_abline(intercept = 0, slope = 1, colour="blue",linetype = "dashed") +
+    ggtitle("Matrix correlation per ROI of the CHARM atlas")
+  
+  
+  mod.mat <- lm(Z_DCZ ~ Z_control * period, subset(VectData, singe== "Homer"))
+  summary(mod.mat)
+  
+  mod.mat <- lm(Z_DCZ ~ Z_control * period, subset(VectData, singe== "Donut"))
+  summary(mod.mat)
+  
+  
+  ggplot(VectData, aes(x= Z_control, y= Z_DCZ))+
+    geom_point(aes(colour=period), alpha=.1, size=2)+
+    scale_colour_manual(values=c("red","grey40"))+
+    facet_grid(. ~ singe)+
+    geom_hline(yintercept = 0)+ geom_vline(xintercept = 0)+
+    geom_abline(intercept = 0, slope = 1, colour="blue",linetype = "dashed") +
+    ggtitle("Matrix correlation per ROI of the CHARM atlas")
+  
+
+  
+```
+  
+#MATRIX CORRELATIONS 
+
+One question is how the matrices of Z compare between pre and post surgery , because the graphs show big differences between pre and post in control especially for homer
+  
+  
+  
+```{r correl, warning=FALSE, message = FALSE, echo=FALSE}
+# create a dataframe to correlate z before and after surgery
+VectData2 <- data.frame( "Z_cont_pre"=c(Docontp),"Z_cont_post"=  c(Docont), "Z_DCZ_pre"=c(Doinjp),"Z_DCZ_post"=  c(Doinj), "ROI_cont"= cc$labels, singe="Donut")
+
+VectData2 <- rbind(VectData2, data.frame( "Z_cont_pre"=c(Hocontp),"Z_cont_post"=  c(Hocont), "Z_DCZ_pre"=c(Hoinjp),"Z_DCZ_post"=  c(Hoinj), "ROI_cont"= cc$labels, singe="Homer") )
+  
+#figures and stats
+  ggplot(VectData2, aes(x= Z_cont_pre, y= Z_cont_post, colour=singe))+
+    geom_point()+
+    geom_smooth(method='lm', colour="blue")+
+    facet_grid(.~singe)+
+    scale_colour_manual(values=c("grey40","grey60"))+
+    geom_hline(yintercept = 0)+ geom_vline(xintercept = 0)+
+    geom_abline(intercept = 0, slope = 1, colour="blue",linetype = "dashed") +
+    ggtitle("Matrix correlation per ROI of the CHARM atlas")
+  
+    ggplot(VectData2, aes(x= Z_DCZ_pre, y= Z_DCZ_post, colour=singe))+
+    geom_point()+
+    geom_smooth(method='lm', colour="blue")+
+    facet_grid(.~singe)+
+    scale_colour_manual(values=c("brown3","brown4"))+
+    geom_hline(yintercept = 0)+ geom_vline(xintercept = 0)+
+    geom_abline(intercept = 0, slope = 1, colour="blue",linetype = "dashed") +
+    ggtitle("Matrix correlation per ROI of the CHARM atlas")
+
+    
+
+    
+    
+    
+a <- ggplot(VectData, aes(x= Z_control, fill=period))+
+    geom_histogram(position="identity", aes(colour=period), alpha=.5, binwidth=.05)+
+    scale_colour_manual(values=c("red","grey40"))+
+    scale_fill_manual(values=c("red","grey40"))+
+    facet_grid(. ~ singe)+
+    scale_y_continuous(trans='log10') +
+    geom_vline(xintercept = 0)+
+    ggtitle("Matrix correlation per ROI of the CHARM atlas")
+  
+b   <- ggplot(VectData, aes(x= Z_DCZ, fill=period))+
+    geom_histogram(position="identity", aes(colour=period), alpha=.5, binwidth=.05)+
+    scale_colour_manual(values=c("red","grey40"))+
+    scale_fill_manual(values=c("red","grey40"))+
+    facet_grid(. ~ singe)+
+  scale_y_continuous(trans='log10') +
+    geom_vline(xintercept = 0)+
+    ggtitle("Matrix correlation per ROI of the CHARM atlas")
+
+
+
+  
+  
+```
+
+
+There is apparently an effect of period pre/post on the entire data when we look at the change between DCZ versus control.
+
+THe first conclusion is that we can't compare pre and post data.
+
+Par ailleurs, il semble y avoir un artefact avec les session Homer post-control. Ceci est vérifiable dans le script CMArMonkey_DREADDS_HD_V4.rmd. La session 5 de Ho est avec une variance exceptionnellement faible comparée à toutes les autres sessions tous singes confondus.
+
+Let's try the previous correlations without session 5 _Ho
+
+
+
+
+
+
+
+
+
+We want to test whether the slopes of correlations between matrices reveal an effect of pre post on correlation and an effect of DCZ in post and pre separately 
+
+```{r slops, warning=FALSE, message = FALSE, echo=FALSE}
+
+
+ ##TO BE DONE: test if slopes are diff from 1 to check whether the DCZ vs Sham are similar or not in terms of correlation values [this is one way to compare the maps]
+  #test mostly by calculating the slope and the standard error of the slope.
+# Then you must calculate a t value as follow t = b1-b2/Sb1-Sb2 where b1 is the value of slope 1 (in your case your example: 0.81) and b2 is the value of slope 2 (in your case your example: 1) and Sb1 is the standard error of slope 1 and Sb2 is the standard error of slope 2 (in this case is 0 because a slope b=1 has zero standard error). In this way you calculate a t value and then you compared it with a t value from a t table with n-2 df and alfa 0.05 or 0.01, if t calculated is less than t value from the table, you can assume that the calculated slope is not different from 1. See Zar (1999). I think that first you must understant the principles of that analyses before you run it in a statistical package. 
+
+# let's try to answer the question: is the entire matrix correlation between DCZ and Control in post for each monkey different from corr with slope = 1 ?
+
+do.lm <- summary(lm(Z_DCZ~ Z_control, data= subset(VectData, singe=="Donut" & period=="pre")))
+ 
+slop.do.lm = do.lm$coefficients[2,1]  
+stdslop.do.lm = do.lm$coefficients[2,2]
+
+
+t = (slop.do.lm - 1) / (stdslop.do.lm - 0)  
+
+qt(0.01, 17689-2, lower.tail=FALSE)
+
+
+do.lm.post <- summary(lm(Z_DCZ~ Z_control, data= subset(VectData, singe=="Donut" & period=="post")))
+ 
+slop.do.lm.post = do.lm.post$coefficients[2,1]  
+stdslop.do.lm.post = do.lm.post$coefficients[2,2]
+
+
+t.post = (slop.do.lm.post - 1) / (stdslop.do.lm.post - 0)  
+
+
+Ho.lm.post <- summary(lm(Z_DCZ~ Z_control, data= subset(VectData, singe=="Homer" & period=="post")))
+ 
+slop.ho.lm.post = Ho.lm.post$coefficients[2,1]  
+stdslop.ho.lm.post = Ho.lm.post$coefficients[2,2]
+
+
+t.h.post = (slop.ho.lm.post - 1) / (stdslop.ho.lm.post - 0)  
+
+Ho.lm.DCZ <- summary(lm(Z_DCZ_post~ Z_DCZ_pre, data= subset(VectData2, singe=="Homer")))
+ 
+slop.ho.lm.DCZ = Ho.lm.DCZ$coefficients[2,1]  
+stdslop.ho.lm.DCZ = Ho.lm.DCZ$coefficients[2,2]
+
+
+t.h.DCZ = (slop.ho.lm.DCZ - 1) / (stdslop.ho.lm.DCZ - 0)  
+
+
+```
+
+Toute les slope sont differentes de 1. DE fait le grande nombre de valeurs renforce fortement la sensibilité.
+
+
+
+
+## Concluding remarks:
+
+*
+
+
+
+
+
+
+
+

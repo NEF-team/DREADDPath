@@ -1,0 +1,1892 @@
+---
+title: "MCC PFC connectivity DREADDS V5"
+author: "EP"
+date: "11/09/2023"
+output: 
+  html_document:
+    toc: yes
+  word_document:
+    toc: yes
+  pdf_document:
+    number_sections: yes
+    toc: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+
+*****
+
+    last pdf update generated -> `r format(Sys.time(), " %d %B, %Y - %H:%M:%S")`
+
+*****
+
+# Introduction
+
+  **Study of the effects of DREADDS HM3Dq+DCZ on MCC LPFC pathway**
+
+The objective is to analyse the RSN data obtained in Homer and DOnut in the pre and post periods of viral transfection and DCZ challenge of HM3dq receptor. Viral vectors used were AAV in MCC anf CAV2 in LPFC to tranfect MCCtoLPFC neurones.
+
+
+We will use the previous analyses on the transition of connectivity pattern from CMAr to LPFC in monkeys using the RSN anesthetized data. The data have been processed by C Amiez (09-12/2020) using the RSN data aquired by C Wilson, E Procyk, V Fontanier, C Goussi. The first subject analysed is Homer, R hemisphere.
+Data are on the form of text files that contain the Z transformed correlations calculated between Seeds in the dorsal bank of the cingulate sulcus, rostral to the level of the genu of the arcuate, and ROIs in the dorsal and ventral bank of the Principalis sulcus, as well as in M1, FEF, SEF, and BA (Monkey Broca's area).
+
+Each file, named for instance HOMER_SeedMCCY33-RoiBA_RUN1.1D , contains columns with : the #ID of the voxel in the LPFC ROI, the coordinates of the voxel (x , y , z) and the Z values in the 5th column. To get the total connectivity one averages the z values across voxels of one ROI. The name of the Seed is in the fileneme, e.g. here MCCY33, as well as the name of the ROI (e.g. here BA).
+
+
+We tested 2 animals (Donut, Homer) and for each the 2 hemispheres (RH and LH) as well as seeds in the fundus and ventral bank of the cingulate sulcus. 
+The script here load everything in one large dataframe such that all data can be analysed at once.
+
+files are in, for instance, ./DREADDS_HD/DONUT/DONUT_1/MCC_DORSALBANK_SEEDS_LH/CorrMap , for Donut left hemisphere and dorsal bank seeds.
+
+** V3 refers to the new realignement and registrations of volumes by C Amiez in february 2023. 
+
+** V4 (17/04/2023) refers to the last update of the data extraction where C Amiez use the whole brain ref for correction of the signal instead of the GreyMatter mask. The GM mask is not good (tiny or absent cortex in some regions) because the contrast WM/GM is not good with the coil. (see DREADDS_RSN_ANALYSIS_V4.docx for details)
+
+** V5 same as V4 but we try all analyses and stats removing control session #5 of Homer. This session has benn shown to present abnormal variance (see figure in V4.html).
+
+
+# Loading data
+\newpage
+
+```{r Libraries loading, message=FALSE, warning=FALSE, include=T, echo=FALSE}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(gridExtra)
+# See https://cran.r-project.org/web/packages/egg/vignettes/Ecosystem.html for grobs arrange
+library(MASS) #caution this will mask dplyr select so we will need to dplyr::select()
+library(zoo)
+library(lattice)
+library(FactoMineR)
+library(factoextra)
+library(reshape2)
+library(RColorBrewer)
+library(pracma)
+library(scales)
+library(grid)
+library(gridExtra)
+library(ggExtra)
+library(multcomp)
+library(MASS)
+library(lme4)
+library(nlme)
+
+
+if (Sys.info()["nodename"] == "PC_MANU_ATIV9"){
+  path <-   "D://DREADDS/"
+  pathout <- "C://Users/eprocyk/Dropbox/Main_drop/R/MRI/CMAs_RSN/CMAr DREADDs/"
+  
+}else if(Sys.info()["nodename"] =="DESKTOP-MANU"){
+   path <-  "E://DREADDS/CHARM-SARM_ATLAS_SPACE/"
+   pathout <- "C://Users/E Procyk/Dropbox/Main_drop/R/MRI/CMAs_RSN/CMAr DREADDs/"
+
+}else if(Sys.info()["nodename"] =="DESKTOP-1OC9B4K"){
+   path <-  "E://DREADDS/"
+   pathout <- "E://MANU_Portable/R/CMAr DREADDs"
+   
+}else{
+  path  <-  "F://DREADDS/"
+}
+
+
+colMCC = "black"
+colLPFC = "dodgerblue"
+
+regenerate = FALSE
+
+
+```
+
+
+The first step is to check and load all data and arrange them in one single data frame
+
+```{r load_rawdata, echo=FALSE, warning=FALSE, , message=FALSE, include=T}
+
+# session type
+
+session_type <- read.table(paste0(pathout,"DCZInjectionSchedule.txt"), header=TRUE)
+
+session_type$period <- as.factor(session_type$period)
+session_type$monkey <- as.factor(session_type$monkey)
+session_type$injection <- as.factor(session_type$injection)
+session_type$session <- as.factor(session_type$session)
+
+
+mkey <- c('HOMER','DONUT')
+
+seeds.MCC <- c('MCC_DORSALBANK_SEEDS','MCC_FUNDUS_SEEDS','MCC_VENTRALBANK_SEEDS')
+hemisph <- c('LH','RH')
+sessionMax <- 8
+
+## CHECK that folders are not empty---------------
+for (mk in 1:length(mkey)){
+  for (session in 1:sessionMax){
+    for (hem in 1:2){
+      for (see in 1:length(seeds.MCC)){
+        path2 <- paste0(path,mkey[mk],'/',mkey[mk],'_',session,'/',seeds.MCC[see],'_',hemisph[hem],'/CorrMap/')
+        lst.file <-  dir(path = path2, pattern ="^.*.1D$", all.files = FALSE,
+                         full.names = FALSE, recursive = FALSE,
+                         ignore.case = FALSE, include.dirs = FALSE, no.. = FALSE)
+        if (is.na(size(lst.file)[2])){
+            disp("**************** WARNING EMPTY FOLDER********************")
+            disp(path2)
+          }
+        }
+      } 
+    }
+  }
+##------------------
+
+
+if (regenerate){
+  
+  MAIN <- data.frame()
+
+  
+  for (mk in 1:length(mkey)){
+    sub.MAIN <- data.frame()
+    for (session in 1:sessionMax){
+      
+      for (hem in 1:2){
+        
+        for (see in 1:length(seeds.MCC)){
+
+          path2 <- paste0(path,mkey[mk],'/',mkey[mk],'_',session,'/',seeds.MCC[see],'_',hemisph[hem],'/CorrMap/')
+          disp(path2)
+
+          lst.file <-  dir(path = path2, pattern ="^.*.1D$", all.files = FALSE,
+                           full.names = FALSE, recursive = FALSE,
+                           ignore.case = FALSE, include.dirs = FALSE, no.. = FALSE)
+          nbf = size(lst.file)[2]
+          ite = 1
+          while(ite<nbf){
+            
+            # select the files / remove the ALLRUNS
+            if (size(grep("ALLRUNS",lst.file[ite],value="TRUE"))[1] == 1){
+              ite = ite + 1
+            }else{
+              
+              if (file.size(paste0(path2,lst.file[ite])) > 0){
+                input <- read.table(paste0(path2,lst.file[ite]))
+                
+                seed.loc <- gregexpr(pattern ='Seed',lst.file[ite], fixed=TRUE)
+                seed <- substr(lst.file[ite],  seed.loc[[1]][1]+4,  seed.loc[[1]][1]+9)
+                seedy <- substr(lst.file[ite],  seed.loc[[1]][1]+8,  seed.loc[[1]][1]+9)
+                #get ROI Name
+                roi.loc1 <- gregexpr(pattern ='Roi',lst.file[ite], fixed=TRUE)
+                roi.loc2 <- gregexpr(pattern ='_RUN',lst.file[ite], fixed=TRUE)
+                roi.name1 <- substr(lst.file[ite],  roi.loc1[[1]][1]+3,  roi.loc1[[1]][1]+6)
+                roi.name2 <- substr(lst.file[ite],  roi.loc1[[1]][1]+3,  roi.loc1[[1]][1]+9)
+                roi.name3 <- substr(lst.file[ite],  roi.loc2[[1]][1]-4,  roi.loc2[[1]][1]-1)
+                
+                # get the RUN number
+                run.loc <- gregexpr(pattern ='RUN',lst.file[ite], fixed=TRUE)
+                run.nb <-  substr(lst.file[ite],  run.loc[[1]][1]+3,  run.loc[[1]][1]+3)
+                
+                #find Y ROI in PS sulcus
+                loc.y <- gregexpr(pattern ='_Y',lst.file[ite], fixed=TRUE)
+                if (loc.y[[1]][1]>0){
+                  roi.y <- substr(lst.file[ite],  loc.y[[1]][1]+2,  loc.y[[1]][1]+3)
+                }else{
+                  roi.y= NA  
+                }
+                
+                if (substr(seed, 6, 6)=="-"){
+                  seedy <- substr(seed, 5, 5)
+                }
+                
+                if (substr(roi.name3, 3, 3)=="Y"){
+                  roi.y <- substr(roi.name3, 4, 4)
+                }
+                
+                input$seed <- seed
+                input$seedy <- seedy
+                input$ROI1 <- roi.name1
+                input$ROI2 <- roi.name2
+                input$ROI3 <- roi.name3
+                input$ROIy <- roi.y
+                input$RUN <- run.nb
+                input$session <- session
+                input$monkey <- mkey[mk]
+                input$hemisph <- hemisph[hem]
+                input$seedMCC <- seeds.MCC[see]
+                
+                sub.MAIN <- rbind( sub.MAIN, input)
+              }
+              #get Seed Name
+              ite = ite + 1
+              
+            }
+          }
+        } 
+      }
+    }  
+
+    MAIN <- rbind(MAIN, sub.MAIN)
+   
+  }
+
+# name the variables
+names(MAIN)<-c("Vx","x","y","z","Zc","Seed","SeedY","ROI1","ROI2","ROI3","ROIy", "RUN","session","monkey","hemisph","seeds.MCC")
+
+#transform some
+MAIN$SeedY <- as.numeric(MAIN$SeedY)
+MAIN$ROIy <- as.numeric(MAIN$ROIy)
+MAIN$RUN <- as.numeric(MAIN$RUN)
+
+MAIN$ROI1[MAIN$ROI1=="Ps_c"] <- "PS_c"
+MAIN$ROI1[MAIN$ROI1=="Ps_d"] <- "PS_d"
+MAIN$ROI1[MAIN$ROI1=="Ps_v"] <- "PS_v"
+MAIN$ROI1[MAIN$ROI1=="Ps_f"] <- "PS_f"
+MAIN$ROI1[MAIN$ROI1=="Ps_r"] <- "PS_r"
+
+# change levels because of miss extracttions
+MAIN$ROI1 <- factor(MAIN$ROI1, levels=c("BA_R","SEF_","FEF_","M1Fa","M1Ha","PS_c","PS_d","PS_v","PS_f", "PS_r"))
+levels(MAIN$ROI1) <- list(BA="BA_R", SEF= "SEF_", FEF= "FEF_", M1face= "M1Fa", M1hand= "M1Ha", PS_c= "PS_c", PS_d= "PS_d",PS_f= "PS_f",PS_v= "PS_v",PS_r= "PS_r")
+
+# reset values of SeedY to set at level of arcuate genu
+HOMER <- subset(MAIN,MAIN$monkey == "HOMER")
+DONUT <- subset(MAIN,MAIN$monkey == "DONUT")
+
+#Then we realign the seeds in MCC on the level of the arcuate. Values are provided on the pdf file of each monkey
+
+HOMER$SeedYnorm <- HOMER$SeedY - 4
+HOMER$ROIynorm <- HOMER$ROIy - min(HOMER$ROIy, na.rm=TRUE)
+
+DONUT$SeedYnorm <- DONUT$SeedY - 5
+DONUT$ROIynorm <- DONUT$ROIy - min(DONUT$ROIy, na.rm=TRUE)
+
+save(list = c("MAIN", "HOMER","DONUT"), file = paste0(pathout,"All_CMADreadds_data_V3.Rdata"))
+
+}
+
+```
+
+###load saved Rdata
+
+```{r load_data, message=FALSE, warning=FALSE, include=T, echo=FALSE}
+
+load(paste0(pathout,"All_CMADreadds_data_V3.Rdata"))
+
+levels(MAIN$ROI1) <- list(BA="BA_R", SEF= "SEF_", FEF= "FEF_", M1face= "M1Fa", M1hand= "M1Ha", PS_c= "PS_c", PS_d= "PS_d",PS_f= "PS_f",PS_v= "PS_v",PS_r= "PS_r")
+
+# From Celine's advice: remove all Zc strictly equal to 0 since these might correspond to voxels outside of the brain ??
+
+MAIN <- subset(MAIN, Zc != 0)
+
+HOMER <- subset(HOMER, Zc != 0)
+DONUT <- subset(DONUT, Zc != 0)
+
+### FROM here we remove session 5 monkey H
+
+HOMER <- subset(HOMER, session != 5)
+
+```
+
+# Ploting data
+Now data are stored in a data frame let's try to graph a few things.
+
+## Overview on all ROI in frontal lobes
+
+```{r , message=FALSE, warning=FALSE, fig.width=10, fig.height=6,include=T, echo=FALSE}
+
+MAIN2 <- rbind(HOMER,DONUT)
+
+# include INJECTION type of session
+MAIN2$injection <- MAIN2$session
+
+for (i in 1:8){
+MAIN2$injection[MAIN2$session==i & MAIN2$monkey=="HOMER"] <- as.factor(session_type$injection[session_type$monkey=="HOMER" & session_type$session==i])
+
+MAIN2$injection[MAIN2$session==i & MAIN2$monkey=="DONUT"] <- session_type$injection[session_type$monkey=="DONUT" & session_type$session==i]
+
+}
+
+MAIN2$injection <- as.factor(MAIN2$injection)
+levels(MAIN2$injection) <- levels(session_type$injection)
+
+#--------------------------------------------------------
+# --- select only Control sessions and data for this part
+#------------------------------------------------------
+
+MAIN2 <- subset(MAIN2, Zc != 0 & injection=="Control")
+
+levels(MAIN2$ROI1) <- list(BA="BA_R", SEF= "SEF_", FEF= "FEF_", M1face= "M1Fa", M1hand= "M1Ha", PS_c= "PS_c", PS_d= "PS_d",PS_f= "PS_f",PS_v= "PS_v",PS_r= "PS_r")
+
+meanROI <- aggregate(Zc ~ Seed + SeedY + SeedYnorm + ROI1 + monkey+ hemisph + seeds.MCC, data= MAIN2, mean)
+
+ggplot(meanROI, aes(x=SeedYnorm, y=Zc, colour=ROI1))+
+ geom_line(size=1)+  
+    facet_grid(monkey ~ hemisph * seeds.MCC, scales = "free_y")+
+   geom_hline(yintercept=0, linetype="dashed",color="black")+
+  scale_color_manual(values=c("#881100","red", "indianred3", "pink", "grey30","gold1", "gold2", "gold3","gold4", "cyan"))+
+     theme(plot.title = element_text(lineheight=.8, face="bold", size=11))+
+  scale_y_continuous(name="Coorrelation Z")+
+   scale_x_continuous(name="Seed Y axis coordinate in MCC", breaks = pretty(MAIN$SeedY, n = 10))+
+  ggtitle("Control: Strengh of functionnal correlations between MCC and frontal ROIs")
+
+meanROIb <- aggregate(Zc ~ SeedY + SeedYnorm + ROI1 + monkey + hemisph, data= MAIN2, mean)
+
+ggplot(meanROIb, aes(x=SeedYnorm, y=Zc, colour=ROI1))+
+ geom_line(size=1)+  
+    facet_grid(monkey ~ hemisph, scales = "free_y")+
+   geom_hline(yintercept=0, linetype="dashed",color="black")+
+  scale_color_manual(values=c("#881100","red", "indianred3", "pink", "grey30","gold1", "gold2", "gold3","gold4", "cyan"))+
+     theme(plot.title = element_text(lineheight=.8, face="bold", size=11))+
+  scale_y_continuous(name="Coorrelation Z")+
+   scale_x_continuous(name="Seed Y axis coordinate in MCC", breaks = pretty(MAIN$SeedY, n = 10))+
+  ggtitle("Control:Strengh of functionnal correlations between MCC and frontal ROIs")
+
+
+
+```
+
+Below the data for both monkeys and all ROis. This shows the global patterns of connectivity. Note that here the data *are not referenced*, and they area averaged over the 2 hemispheres.
+
+
+```{r , message=FALSE, warning=FALSE, fig.width=10, fig.height=6,include=T, echo=FALSE}
+
+
+
+m1 <- ggplot(subset(meanROI, monkey=="HOMER"), aes(x=SeedYnorm, y=ROI1, fill=Zc))+
+  geom_tile()+
+  facet_grid(.~ seeds.MCC, scales = "free_x")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red",  
+   midpoint = 0,  space = "Lab",
+   name="Zcorr") +
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"),legend.position = "bottom")+
+  ggtitle("Control: HOMER both hemispheres")
+ 
+m2 <- ggplot(subset(meanROI, monkey=="DONUT"), aes(x=SeedYnorm, y=ROI1, fill=Zc))+
+  geom_tile()+
+  facet_grid(.~ seeds.MCC, scales = "free_x")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr")  +
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"),legend.position = "bottom")+
+  ggtitle("Control: DONUT both hemispheres")
+
+grid.arrange(m1,m2,ncol=2)
+
+
+```
+
+And the data as lines per monkey
+
+```{r perMonkey, fig.height=5, fig.width=7, message=FALSE, warning=FALSE, include=T, echo=FALSE}
+# BY monkey
+
+meanROI2 <- meanROI
+
+for (mk in 1:length(mkey)){
+
+plot <- ggplot(subset(meanROI2, monkey==mkey[mk]), aes(x=SeedYnorm, y=Zc, colour=ROI1))+
+ geom_line(size=1)+  
+    facet_grid(hemisph ~  seeds.MCC )+
+   geom_hline(yintercept=0, linetype="dashed",color="black")+
+  scale_color_manual(values=c("#881100","red", "indianred3", "pink", "grey30","gold1", "gold2", "gold3","gold4","cyan"))+
+     theme(plot.title = element_text(lineheight=.8, face="bold", size=11))+
+  scale_y_continuous(name="Correlation Z")+
+ #  scale_x_continuous(name="Seed Y axis coordinate in MCC", breaks = pretty(MAIN$SeedY, n = 10))+
+  ggtitle(paste0(mkey[mk],": Control - raw functionnal correlations between MCC and frontal ROIs"))
+  
+ mk=mk+1
+ 
+print(plot)
+  
+}
+```
+
+
+
+## Selected hemispheres for DREADDs
+We have effects in all hemispheres with some laterality effects. PLUS DONUT has a problem in his R hemisphere where we have observed an infarct at the level of the central sulcus, upper part.
+Let select the hemispheres that we will use for injections: 
+HOMER: Right hemiphere
+DONUT : Left hemisphere
+
+
+
+```{r , message=FALSE, warning=FALSE, include=T, echo=FALSE}
+HOMER.R <- subset(meanROI2, monkey=="HOMER" & hemisph=="RH")
+DONUT.L <- subset(meanROI2, monkey=="DONUT" & hemisph=="LH")
+
+
+meanROI2.uni <- rbind(HOMER.R, DONUT.L)
+
+
+
+# ## referencing
+# 
+# xx =levels(meanROI2.uni$ROI1)
+# 
+# 
+# for (mk in 1:length(mkey)){ 
+#   mkey[mk]
+# 
+# for (see in 1:length(seeds.MCC)){
+#   seeds.MCC[see]
+#   
+# for (r1 in 1:length(xx)){
+#   
+#   xx[r1]
+#   
+# meanROI2.uni$Zc[meanROI2.uni$ROI1== xx[r1] & meanROI2.uni$seeds.MCC==seeds.MCC[see] & meanROI2.uni$monkey == mkey[mk]] <- meanROI2.uni$Zc[meanROI2.uni$ROI1== xx[r1]& meanROI2.uni$seeds.MCC==seeds.MCC[see]& meanROI2.uni$monkey == mkey[mk]] - mean(meanROI2.uni$Zc[meanROI2.uni$SeedYnorm<4 & meanROI2.uni$seeds.MCC==seeds.MCC[see] & meanROI2.uni$ROI1== xx[r1] & meanROI2.uni$monkey == mkey[mk]])
+# 
+# 
+#   }
+#  }
+# }
+
+
+
+```
+
+```{r , fig.width=10,fig.height=6, message=FALSE, warning=FALSE, include=T, echo=FALSE}
+
+m1 <-ggplot(subset(meanROI2.uni, monkey=="HOMER"), aes(x=SeedYnorm, y=ROI1, fill=Zc))+
+  geom_raster()+
+  facet_wrap(~monkey, ncol=4, scales = "free")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red",  
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+  xlab("level of seeds in MCC (mm)")+
+  ggtitle("Control HOMER")
+
+m2 <-ggplot(subset(meanROI2.uni, monkey=="DONUT"), aes(x=SeedYnorm, y=ROI1, fill=Zc))+
+  geom_raster()+
+  facet_wrap(~monkey, ncol=4, scales = "free")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red",  
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+  xlab("level of seeds in MCC (mm)")+
+  ggtitle("Control DONUT")
+
+grid.arrange(m1,m2,ncol=2,top="Control:  all MCC banks")
+
+```
+
+```{r , fig.width=10,fig.height=6, message=FALSE, warning=FALSE, include=T, echo=FALSE}
+
+m1 <- ggplot(subset(meanROI2.uni, monkey=="HOMER"), aes(x=SeedYnorm, y=ROI1, fill=Zc))+
+  geom_tile()+
+  facet_grid(.~ seeds.MCC, scales = "free_x")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red",  
+   midpoint = 0,  space = "Lab",
+   name="Zcorr") +
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"),legend.position = "bottom")+
+  ggtitle(" HOMER")
+ 
+m2 <- ggplot(subset(meanROI2.uni, monkey=="DONUT"), aes(x=SeedYnorm, y=ROI1, fill=Zc))+
+  geom_tile()+
+  facet_grid(.~ seeds.MCC, scales = "free_x")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr")  +
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"),legend.position = "bottom")+
+  ggtitle(" DONUT")
+
+
+grid.arrange(m1,m2,ncol=2,top="Control:  for selected hemispheres all sessions averaged")
+
+
+```
+
+
+```{r , message=FALSE, warning=FALSE, include=T, echo=FALSE,fig.height=6, fig.width=10}
+
+ggplot(meanROI2.uni, aes(x=SeedYnorm, y=Zc, colour=ROI1))+
+ geom_line(size=1)+  
+    facet_grid(monkey ~  seeds.MCC, scales = "free_y" )+
+   geom_hline(yintercept=0, linetype="dashed",color="black")+
+  scale_color_manual(values=c("#881100","red", "indianred3", "pink", "grey30","gold1", "gold2", "gold3","gold4","goldenrod"))+
+     theme(plot.title = element_text(lineheight=.8, face="bold", size=11))+
+  scale_y_continuous(name="Correlation Z")+
+ #  scale_x_continuous(name="Seed Y axis coordinate in MCC", breaks = pretty(MAIN$SeedY, n = 10))+
+  ggtitle("Control - target hemispheres:  correlations between MCC and frontal ROIs")
+
+
+
+```
+
+
+
+So we clearly see the shift of connectivity at round Y = 5.
+Patterns are very similar between the 2 monkeys when we take all sessions together and only the target hemispheres (hemispheres used for the transfections).
+Interestingly M1 face and BA are more or less peaking ate the same levels for both monkeys. However they do not exactly change as SEF Zc which increases more anteriorly together with Prinsipalis ROI.
+
+
+
+
+# Connectivity with the Sulcus Principalis
+
+ let's look specifically at connectivity in the Principalis, looking at the caudo-rostral and dorso-ventral trends of connectivity with MCC:
+
+
+```{r , message=FALSE, warning=FALSE, include=T,fig.height=7, fig.width=7, echo=FALSE}
+
+
+inPS <- aggregate(Zc ~ SeedYnorm +seeds.MCC+ ROIynorm + ROI1+ monkey + hemisph, data=MAIN2, mean)
+
+HOMER.psR <- subset(inPS, monkey=="HOMER" & hemisph=="RH" )
+DONUT.psL <- subset(inPS, monkey=="DONUT" & hemisph=="LH" )
+
+
+inPS.uni <- rbind(HOMER.psR, DONUT.psL)
+
+# here we remove the single ROI in caudal part
+inPS.uni <- subset(inPS.uni, ROI1 != "PS_c")
+inPS.uni$ROI1 <- factor(inPS.uni$ROI1, levels=c("BA","SEF","FEF","M1face","M1hand","PS_c","PS_d","PS_f","PS_v","PS_r"))
+
+#-------------------
+
+ggplot(inPS.uni, aes(x=Zc,colour=as.factor(ROIynorm)))+
+  geom_density(size=1)+
+facet_grid(monkey~., scales = "free_y")+
+  geom_vline(xintercept=0, linetype="dashed",color="black")+
+    scale_color_manual("Ant. Levels in PS",values=c("goldenrod","goldenrod1","goldenrod2",
+                                "goldenrod3","goldenrod4","firebrick","firebrick1","firebrick2","firebrick3","firebrick4","red"))+
+     theme(plot.title = element_text(lineheight=.6, face="bold", size= 11 ))+
+  scale_y_continuous(name="Coorrelation Z")+
+   scale_x_continuous(name="Zc")+
+  ggtitle("Control- Target hemispheres: distribution of correlation strengths between MCC and PS ")
+
+
+
+
+ggplot(inPS.uni, aes(x=Zc,colour=as.factor(ROIynorm)))+
+  geom_density(size=1)+
+facet_grid(monkey~seeds.MCC, scales = "free_y")+
+  geom_hline(yintercept=0, linetype="dashed",color="black")+
+    scale_color_manual("Ant. Levels in PS",values=c("goldenrod","goldenrod1","goldenrod2",
+                                "goldenrod3","goldenrod4","firebrick","firebrick1","firebrick2","firebrick3","firebrick4","red"))+
+     theme(plot.title = element_text(lineheight=.6, face="bold", size= 11 ))+
+  scale_y_continuous(name="Coorrelation Z")+
+   scale_x_continuous(name="Zc")+
+  ggtitle("Control- Target hemispheres: distribution of correlation strengths between MCC and PS ")
+```
+
+```{r , message=FALSE, warning=FALSE, include=T,fig.height=9, fig.width=9, echo=FALSE}
+
+for (mk in 1:length(mkey)){
+  
+plot <- ggplot(subset(inPS.uni,monkey==mkey[mk]), aes(x=as.factor(SeedYnorm), y=as.factor(ROIynorm), fill=Zc))+
+  geom_tile()+
+  facet_grid(ROI1 ~ seeds.MCC, scales = "free_x")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle(paste0(mkey[mk],": correlations between MCC seeds and dorsal,ventral and fundus PS"))
+ print(plot) 
+}
+```
+
+
+```{r , message=FALSE, warning=FALSE, include=T, echo=FALSE,fig.height=5, fig.width=8}
+
+a<- ggplot(subset(inPS.uni,monkey=="HOMER" & seeds.MCC=="MCC_DORSALBANK_SEEDS" & ROI1 != "PS_r") , aes(x=as.factor(SeedYnorm), y=as.factor(ROIynorm), fill=Zc))+
+geom_raster()+
+   facet_grid(ROI1~., scales = "free")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCCd")+
+  ggtitle("HOMER")
+
+
+b<- ggplot(subset(inPS.uni, monkey=="DONUT" & seeds.MCC=="MCC_DORSALBANK_SEEDS"&  ROI1 != "PS_r"), aes(x=as.factor(SeedYnorm), y=as.factor(ROIynorm), fill=Zc))+
+geom_raster()+
+facet_grid(ROI1~., scales = "free")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle("DONUT")
+
+grid.arrange(a,b,ncol=2,top="Control: target Hem. correlations between dorsal-MCC seeds and Principalis ROIs")
+
+```
+
+The figures show that posterior seeds in MCC (around 4 to 10) connect overall more strongly with the caudal ventral bank of PS than rostral seeds. But some MCC regions, especially anteriorly , do correlate with anterio PS (see the diagonal pattern on heatmaps after +5 mm in MCC).
+
+
+----
+
+
+
+# TEST the effect of SESSIONS / DCZ
+
+So the first simple approach is to look at the maps above (with all ROI and with on the LPFC) broke down by session. This is a blind approach (EP doesn't know which session is which). The idea is to find out whether connectivity patterns can be clustered between the different sessions. This will also show how much stability we have between sessions.
+What we know is that sessions 1 to 4 are pre-surgery, and sessions 5-8 are post-surgery.
+
+
+Again here session 5 (control / post) of monkey H is removed
+
+
+```{r , message=FALSE, warning=FALSE, include=T, echo=FALSE,fig.height=8, fig.width=8}
+
+
+MAIN3 <- rbind(HOMER,DONUT)
+
+MAIN3$injection <- MAIN3$session
+
+for (i in 1:8){
+MAIN3$injection[MAIN3$session==i & MAIN3$monkey=="HOMER"] <- as.factor(session_type$injection[session_type$monkey=="HOMER" & session_type$session==i])
+
+MAIN3$injection[MAIN3$session==i & MAIN3$monkey=="DONUT"] <- session_type$injection[session_type$monkey=="DONUT" & session_type$session==i]
+
+}
+
+MAIN3$injection <- as.factor(MAIN3$injection)
+
+levels(MAIN3$injection) <- levels(session_type$injection)
+
+MAIN3$period <- MAIN3$session
+MAIN3$period[MAIN3$session < 5] <- "pre"
+MAIN3$period[MAIN3$session >= 5] <- "post"
+MAIN3$period <- ordered(MAIN3$period, levels = c("pre", "post"))
+
+
+
+
+
+
+meanROI3 <- aggregate(Zc ~ SeedY + SeedYnorm + ROI1 + monkey+ injection + period + hemisph + seeds.MCC, data= MAIN3, mean)
+
+HOMER3.R <- subset(meanROI3, monkey=="HOMER" & hemisph=="RH")
+DONUT3.L <- subset(meanROI3, monkey=="DONUT" & hemisph=="LH")
+
+meanROI3.uni <- rbind(HOMER3.R, DONUT3.L) #UNILATERAL DATA where injection were
+
+
+
+
+
+
+
+# # the script below is to reference the data to post-Arcuate measures
+# 
+# cperiod = levels(meanROI3.uni$period)
+# cinject = levels(meanROI3.uni$injection)
+# # 
+# xx =levels(meanROI3.uni$ROI1)
+# # 
+# #  
+# 
+# for (per1 in 1: length(cperiod)){ 
+#   
+#   for (inj1 in 1: length(cinject)){
+# 
+#     for (mk in 1:length(mkey)){ 
+#   mkey[mk]
+# # 
+#  for (see in 1:length(seeds.MCC)){
+#    seeds.MCC[see]
+# #   
+#  for (r1 in 1:length(xx)){
+# #   
+#   xx[r1]
+# 
+#      
+# 
+# #   
+# meanROI3.uni$Zc[meanROI3.uni$ROI1== xx[r1] & meanROI3.uni$seeds.MCC==seeds.MCC[see] & meanROI3.uni$monkey == mkey[mk] & meanROI3.uni$period == cperiod[per1] & meanROI3.uni$injection == cinject[inj1]] <- meanROI3.uni$Zc[meanROI3.uni$ROI1== xx[r1] & meanROI3.uni$seeds.MCC==seeds.MCC[see] & meanROI3.uni$monkey == mkey[mk] & meanROI3.uni$period == cperiod[per1] & meanROI3.uni$injection == cinject[inj1]] - mean(meanROI3.uni$Zc[meanROI3.uni$SeedYnorm<4 & meanROI3.uni$seeds.MCC==seeds.MCC[see] & meanROI3.uni$ROI1== xx[r1] & meanROI3.uni$monkey == mkey[mk] & meanROI3.uni$period == cperiod[per1] & meanROI3.uni$injection == cinject[inj1]]  )
+# # 
+# # 
+#   }
+#  }
+#  }
+#  }
+# }
+
+#
+
+ggplot(subset(meanROI3.uni,seeds.MCC=="MCC_DORSALBANK_SEEDS"), aes(x=SeedYnorm, y=Zc, colour=ROI1))+
+ geom_line(size=1)+  
+    facet_grid(monkey ~ period * injection, scales = "free_y")+
+   geom_hline(yintercept=0, linetype="dashed",color="black")+
+  scale_color_manual(values=c("#881100","red", "indianred3", "pink", "grey30","gold1", "gold2", "gold3","gold4", "cyan"))+
+     theme(plot.title = element_text(lineheight=.8, face="bold", size=11))+
+  scale_y_continuous(name="Coorrelation Z")+
+   scale_x_continuous(name="Seed Y axis coordinate in MCC", breaks = pretty(MAIN$SeedY, n = 10))+
+  ggtitle("Strengh of correlations between MCC-frontal_ROIs - DORSAL MCC seeds -referenced, target hemis. ")
+
+
+perROi <- aggregate(Zc ~ ROI1 + monkey + seeds.MCC + injection + period, data = meanROI3.uni, mean)
+
+
+coord_radar <- function (theta = "x", start = 0, direction = 1){
+        theta <- match.arg(theta, c("x", "y"))
+        r <- if (theta == "x") 
+            "y"
+        else "x"
+        ggproto("CordRadar", CoordPolar, theta = theta, r = r, start = start, 
+            direction = sign(direction),
+            is_linear = function(coord) TRUE)
+}
+
+RadarTheme<-theme(panel.background=element_blank(),
+                      plot.title= element_text(size = 15,face=c("bold","italic")),
+                      plot.margin = unit(c(1, 2, 1, 2), "cm"),
+                    #  text=element_text(family="Open Sans"), aspect.ratio = 1,
+                      legend.position="right",legend.title=element_blank(),legend.direction="vertical",
+                      strip.text.x = element_text(size = rel(0.8)),
+                      axis.text.x = element_text(size = 10,face ="bold"),
+                     # axis.ticks.y = element_blank(),
+                     # axis.text.y = element_blank(),
+                      axis.line.x=element_line(size=0.5),
+                      panel.grid.major=element_line(size=0.3,linetype = 2,colour="grey"))
+
+ggplot(subset(perROi,seeds.MCC=="MCC_DORSALBANK_SEEDS"), aes(x=ROI1, y=Zc, fill=injection))+
+  geom_polygon(aes(group = injection, color = injection), alpha=.10, size=1) +
+  facet_grid(monkey~period)+
+  coord_radar()+
+  RadarTheme+
+    scale_colour_manual(values=c( "grey30","red"))+
+      scale_fill_manual(values=c( "grey30","red"))
+
+
+ggplot(subset(perROi,seeds.MCC=="MCC_DORSALBANK_SEEDS"), aes(x=ROI1, y=Zc, fill=period))+
+  geom_polygon(aes(group = period, color = period), alpha=.10, size=1) +
+  facet_grid(monkey~injection)+
+  coord_radar()+
+  RadarTheme+
+    scale_colour_manual(values=c( "aquamarine3","darkgoldenrod4"))+
+      scale_fill_manual(values=c( "aquamarine3","darkgoldenrod4"))
+
+
+ 
+# perROi2 <- aggregate(Zc ~ SeedYnorm + ROI1 + monkey + seeds.MCC + injection + period, data = meanROI3.uni, mean)
+# 
+# ggplot(subset(perROi2,seeds.MCC=="MCC_DORSALBANK_SEEDS" & period=="post"), aes(x=ROI1, y=Zc, colour=injection))+
+#   geom_polygon(aes(group = injection, color = injection), alpha=.10, size=1) +
+#   facet_grid(monkey~SeedYnorm)+
+#   coord_radar()+
+#   RadarTheme+
+#     scale_colour_manual(values=c( "grey30","red"))
+
+
+```
+
+
+Before going to averages we investigate the Zscores at the Voxel level, sur le modèle de ce qui fut fait pour les data de Sherley. Ont séprare les région avec un Zscore moyen en control positif ou négatif puis on regarde au niveau des voxels les évolutions entre CONT et DCZ.
+In a first pass we won't use a threshold bu the take the data from all the ROi we have . We just separate ROIs with positive and negative average Zc
+
+```{r voxels, message=FALSE, warning=FALSE, include=T, echo=FALSE,fig.height=9, fig.width=11}
+
+# first we assign 
+MAIN3.uni <- rbind(subset(MAIN3, monkey=="HOMER" & hemisph=="RH"), subset(MAIN3, monkey=="DONUT" & hemisph=="LH"))
+
+
+ggplot(MAIN3.uni,   aes(x=ROI1, y = Zc, colour=ROI1))+
+  geom_boxplot()+
+  facet_grid(as.factor(RUN) ~ monkey*injection)+
+  geom_hline(yintercept = 0)+ ggtitle("Mesures by RUNs")
+
+
+ggplot(MAIN3.uni, aes(x=ROI1, y = Zc, colour=ROI1))+
+  geom_boxplot()+
+  facet_grid(period ~ monkey*injection)+
+  geom_hline(yintercept = 0)
+
+
+selectvx <- aggregate(Zc ~ ROI1 + monkey + seeds.MCC, data=subset(MAIN3.uni, session<5) , mean )
+
+
+
+```
+
+
+We show the heatmaps for  data across sessions 1 to 8:
+
+```{r dreadd_session_ref_uni, message=FALSE, warning=FALSE, include=T, echo=FALSE,fig.height=11, fig.width=11}
+
+
+m1 <- ggplot(subset(meanROI3.uni, monkey=="HOMER" & seeds.MCC=="MCC_DORSALBANK_SEEDS"), aes(x=SeedYnorm, y=ROI1, fill=Zc))+
+  geom_tile()+
+  facet_grid(period ~ injection , scales = "free_x")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr") +
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"))+
+  ggtitle(" HOMER RH - MCCd")+ theme(legend.position = "right")
+ 
+
+m2 <- ggplot(subset(meanROI3.uni, monkey=="DONUT"& seeds.MCC=="MCC_DORSALBANK_SEEDS"), aes(x=SeedYnorm, y=ROI1, fill=Zc))+
+  geom_tile()+
+  facet_grid(period ~ injection  , scales = "free_x")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red",
+   midpoint = 0,  space = "Lab",
+   name="Zcorr")  +
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"))+
+  ggtitle(" DONUT LH - MCCd") + theme(legend.position = "right")
+
+grid.arrange(m1,m2,ncol=2,top=" MCCd data - selected hemispheres")
+
+
+
+m1 <- ggplot(subset(meanROI3.uni, monkey=="HOMER" & seeds.MCC=="MCC_VENTRALBANK_SEEDS"), aes(x=SeedYnorm, y=ROI1, fill=Zc))+
+  geom_tile()+
+  facet_grid(period ~ injection , scales = "free_x")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr") +
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"))+
+  ggtitle(" HOMER RH - MCCv")+ theme(legend.position = "right")
+ 
+
+m2 <- ggplot(subset(meanROI3.uni, monkey=="DONUT"& seeds.MCC=="MCC_VENTRALBANK_SEEDS"), aes(x=SeedYnorm, y=ROI1, fill=Zc))+
+  geom_tile()+
+  facet_grid(period ~ injection  , scales = "free_x")+
+ scale_fill_gradient2(low = "darkblue", mid = "white", high = "red",
+   midpoint = 0,  space = "Lab",
+   name="Zcorr")  +
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"))+
+  ggtitle(" DONUT LH - MCCv") + theme(legend.position = "right")
+
+
+grid.arrange(m1,m2,ncol=2,top=" MCCv data - selected hemispheres")
+```
+
+
+## Look at Variance
+
+Let see how the distributions of Z values evolve within sessions and between sessions. 
+We rename first the sessions before and after surgery. This is to look at the signal in session where there were no manipulations.
+
+ATTENTION : we exclude RUN1 and session 1 that showed to be outliers in several cases///this can be revised
+
+```{r, message=FALSE, warning=FALSE}
+# let's include back RUN in the dataset
+
+meanROI4.uni <- aggregate(Zc ~ RUN + SeedYnorm + ROI1 + monkey+ session+ period + injection + seeds.MCC, data= subset(MAIN3.uni, RUN>1), mean)
+
+meanROI4.uni$session <- as.factor(meanROI4.uni$session)
+
+
+# meanROI4$period <- meanROI4$session
+# meanROI4$period[meanROI4$period < 5] <- 1
+# meanROI4$period[meanROI4$period >= 5] <- 2
+
+# meanROI4$period <- factor(meanROI4$period, levels = c("1","2"), labels=c("Pre-chir","Post-chir"))
+
+
+
+```
+
+()
+We test whether for each monkey separately we have a significant effect of period and Injections on the distributions of Zc GLOBALLY. 
+
+
+## Pre- Post- effects
+
+Graphs of the session pre- post- for all seeds.
+
+The first things we observe is that for both monkeys the post- distribution seems to be slightly shifted toward negative values compared to pre... The overall figure for all data together shows this: - significant for both monkeys.
+
+```{r, message=FALSE, warning=FALSE,fig.height=8, fig.width=8}
+library(summarytools)
+
+Donut.data <- subset(meanROI4.uni,meanROI4.uni$monkey=="DONUT")
+Homer.data <- subset(meanROI4.uni,meanROI4.uni$monkey=="HOMER")
+
+
+descr(Donut.data$Zc[Donut.data$injection=='Control'],stats='common')
+descr(Donut.data$Zc[Donut.data$injection=='DCZ'],stats='common')
+
+Donut.data$session <- as.factor(Donut.data$session)
+Homer.data$session <- as.factor(Homer.data$session)
+
+#shapiro.test(Donut.data$Zc)   # sample siez must be between 3 and 5000
+#shapiro.test(Homer.data$Zc) # significantly diff fom normal, but the shape and size of data makes it impossible to transform
+
+
+
+
+# DESCRIPTION of Zc values - only Control values
+ggplot(subset(meanROI4.uni, meanROI4.uni$RUN>1 & meanROI4.uni$injection=="Control"), aes(x=Zc, fill= as.factor(period), color=as.factor(period)))+
+  geom_histogram(alpha=.5, position="identity")+
+  geom_vline(xintercept=0)+
+  facet_grid(.~monkey)+
+  scale_color_manual(values=c("grey40","blue"))+
+  scale_fill_manual(values=c("grey40","blue"))+
+  ggtitle(" Z between pre-post-surgery/ session>1/Control Unilat- all seeds all ROI together")
+
+ggplot(subset(meanROI4.uni, meanROI4.uni$RUN>1 & meanROI4.uni$injection=="Control"), aes(x=Zc, fill= as.factor(period), color=as.factor(period)))+
+  geom_histogram(alpha=.5, position="identity")+
+  geom_vline(xintercept=0)+
+  facet_grid(session~monkey)+
+  scale_color_manual(values=c("grey40","blue"))+
+  scale_fill_manual(values=c("grey40","blue"))+
+  ggtitle(" Z between pre-post-surgery/ session>1/Control Unilat- all seeds all ROI together")
+
+# DESCRIPTION of Zc values - all values.
+ggplot(subset(meanROI4.uni, meanROI4.uni$RUN>1), aes(x=Zc, fill= as.factor(injection), color=as.factor(injection)))+
+  geom_histogram(alpha=.6, position="identity")+
+  geom_vline(xintercept=0)+
+  facet_grid(period~monkey)+
+  scale_color_manual(values=c("black","orange"))+
+  scale_fill_manual(values=c("black","orange"))+
+  ggtitle(" Z between pre-post-surgery/ session>1/Unilat- all seeds all ROI together")
+
+# DESCRIPTION of Zc values - all values.
+
+
+
+ ggplot(subset(meanROI4.uni, meanROI4.uni$RUN>1), aes(x=Zc, fill= as.factor(period), color=as.factor(period)))+
+  geom_histogram(alpha=.6, position="identity", bins=50)+
+  geom_vline(xintercept=0)+
+  facet_grid(session*injection~monkey)+
+  scale_color_manual(values=c("grey40","blue"))+
+  scale_fill_manual(values=c("grey40","blue"))+
+  ggtitle(" Z between pre-post-surgery/ session>1/Unilat- all seeds all ROI together")
+ 
+ 
+#  # Coordinates of voxel for each session pre and post 
+# ggplot(subset(MAIN3, MAIN3$RUN>1 & MAIN3$injection=="Control"), aes(x=y, y=z, fill= as.factor(period), color=as.factor(period)))+
+#   geom_point(alpha=.6)+
+#   geom_vline(xintercept=0)+
+#   facet_grid(.~monkey)+
+#   scale_color_manual(values=c("grey40","blue"))+
+#   scale_fill_manual(values=c("grey40","blue"))+
+#   ggtitle(" y/z between pre-post-surgery/ session>1/Unilat- all seeds all ROI together")
+# 
+# ggplot(subset(MAIN3, MAIN3$RUN>1 & MAIN3$injection=="Control"), aes(x=y, y=z, fill= as.factor(period), color=as.factor(period)))+
+#   geom_point(alpha=.6)+
+#   geom_vline(xintercept=0)+
+#   facet_grid(session~monkey)+
+#   scale_color_manual(values=c("grey40","blue"))+
+#   scale_fill_manual(values=c("grey40","blue"))+
+#   ggtitle(" y/z between pre-post-surgery/ session>1/Unilat- all seeds all ROI together")
+
+
+
+```
+
+In this version of corrected data, we test  overall the pre post effect 
+.
+There is no significant effect of period, no interaction between period and DCZ, and finally there is no global effect of DCZ (on the target hemisphere, using together all seeds all ROIs) on pre- data alone.
+
+
+
+
+```{r glm_RUNS, message=FALSE, warning=FALSE}
+# test period (pre vs post) effect on CONTROL only
+
+
+lme.RUN.don <- lme(Zc ~ period, random = ~ 1|session/RUN , data=subset(Donut.data, Donut.data$injection=="Control"))
+summary(lme.RUN.don)
+
+lme.RUN.hom <- lme(Zc ~ period, random = ~ 1|session/RUN , data=subset(Homer.data, Homer.data$injection=="Control"))
+summary(lme.RUN.hom)
+
+lme.RUN.don <- lme(Zc ~ ROI1/(period * injection), random = ~ 1|session/RUN, data=Donut.data)
+summary(lme.RUN.don)
+
+lme.RUN.hom <- lme(Zc ~ period * injection, random = ~ 1|session/RUN, data=Homer.data)
+summary(lme.RUN.hom)
+
+#test DCZ pre
+lme.DCZpreRUN.don <- lme(Zc ~ injection, random = ~ 1|session/RUN, data=subset(Donut.data, Donut.data$period=="pre"))
+summary(lme.DCZpreRUN.don)
+
+lme.DCZpreRUN.hom <- lme(Zc ~ injection, random = ~ 1|session/RUN, data=subset(Homer.data, Homer.data$period=="pre"))
+summary(lme.DCZpreRUN.hom)
+
+#test DC post
+glm.DCZpreRUN.don <- glm(Zc ~ injection, data=subset(Donut.data, Donut.data$period=="post"))
+summary(glm.DCZpreRUN.don)
+
+glm.DCZpreRUN.hom <- glm(Zc ~ injection, data=subset(Homer.data, Donut.data$period=="post"))
+summary(glm.DCZpreRUN.hom)
+
+
+```
+
+Then we perform a global test taking into account the multiple ROIs. 
+We test separately 'pre' and 'post' to better identify a potential DCZ effect
+
+```{r glm_RUNSb, message=FALSE, warning=FALSE}
+lme.RUN.don <- lme(Zc ~ ROI1/injection, random = ~ 1|session/RUN, data=subset(meanROI4.uni,monkey=="DONUT" & period=="pre"))
+summary(lme.RUN.don)
+
+lme.RUN.don <- lme(Zc ~ ROI1/injection, random = ~ 1|session/RUN, data=subset(meanROI4.uni,monkey=="DONUT" & period=="post"))
+summary(lme.RUN.don)
+
+#------------
+
+lme.RUN.hom <- lme(Zc ~ ROI1/injection, random = ~ 1|session/RUN, data=subset(meanROI4.uni,monkey=="HOMER"& period=="pre"))
+summary(lme.RUN.hom)
+
+lme.RUN.hom <- lme(Zc ~ ROI1/injection, random = ~ 1|session/RUN, data=subset(meanROI4.uni,monkey=="HOMER"& period=="post"))
+summary(lme.RUN.hom)
+
+```
+
+
+
+## FOCUS on MCC dorsal seeds
+
+We stay with data excluding session 1 and take only data from the last 4 runs (2,3,4 and 5).
+We 1st look at MCC dorsal bank.
+The first analyses look at pre- and post- session separately
+
+```{r, message=FALSE, warning=FALSE,fig.height=4, fig.width=7}
+meanROI4.MCCd.uni <- subset(meanROI4.uni,  seeds.MCC=="MCC_DORSALBANK_SEEDS")
+
+Donut.data <- subset(meanROI4.MCCd.uni,meanROI4.MCCd.uni$monkey=="DONUT")
+Homer.data <- subset(meanROI4.MCCd.uni,meanROI4.MCCd.uni$monkey=="HOMER")
+
+
+ ggplot(meanROI4.MCCd.uni, aes(x=Zc, fill= as.factor(period), color=as.factor(injection)))+
+  geom_histogram(alpha=.6, position="identity", bins=50)+
+  geom_vline(xintercept=0)+
+  facet_grid(session*injection~monkey)+
+  scale_color_manual(values=c("grey80","red"))+
+  scale_fill_manual(values=c("dodgerblue3","orange"))+
+  ggtitle(" Z between pre-post-surgery/ Unilat- MCCd all ROI together")
+ 
+
+ggplot(subset(meanROI4.MCCd.uni, meanROI4.MCCd.uni$period=="pre"), aes(x=Zc, fill= as.factor(injection), color=as.factor(injection)))+
+  geom_histogram(alpha=.6, position="identity")+
+  geom_vline(xintercept=0)+
+  facet_grid(period~monkey)+
+  scale_color_manual(values=c("black","orange"))+
+  scale_fill_manual(values=c("black","orange"))+
+  ggtitle(" Z in PRE-surgery MCCdbank//Unilat- all seeds all ROI together")+ theme(legend.position="bottom")
+
+# neg Zc
+a<- ggplot(subset(meanROI4.MCCd.uni,meanROI4.MCCd.uni$Zc<0 & meanROI4.MCCd.uni$period=="pre"), aes(x=Zc, fill= as.factor(injection)))+
+  geom_boxplot(alpha=.5)+
+  geom_vline(xintercept=0)+
+  facet_grid(session~monkey)+
+  scale_color_manual(values=c("black","orange"))+
+  scale_fill_manual(values=c("black","orange"))+
+  ggtitle("NEGATIVE Zc in PRE-surgery MCCdbank//Unilat- all seeds all ROI together")+ theme(legend.position="bottom")
+#pos Zc
+b<- ggplot(subset(meanROI4.MCCd.uni,meanROI4.MCCd.uni$Zc>0& meanROI4.MCCd.uni$period=="pre"), aes(x=Zc, fill= as.factor(injection)))+
+  geom_boxplot(alpha=.5)+
+  geom_vline(xintercept=0)+
+  facet_grid(session~monkey)+
+  scale_color_manual(values=c("black","orange"))+
+  scale_fill_manual(values=c("black","orange"))+
+  ggtitle("POSITIVE Zc in PRE-surgery MCCdbank//Unilat- all seeds all ROI together")+ theme(legend.position="bottom")
+grid.arrange(a,b,ncol=2)
+
+# stats 
+gmixt.Do.PRE<- lme(Zc ~ injection , random=~1|session, data=subset(Donut.data, Donut.data$period=="pre"))
+ summary(gmixt.Do.PRE)
+
+
+gmixt.Ho.PRE<- lme(Zc ~ injection , random=~1|session, data=subset(Homer.data, Homer.data$period=="pre"))
+summary(gmixt.Ho.PRE)
+
+
+#-------- POST
+
+# neg Zc
+a<- ggplot(subset(meanROI4.MCCd.uni,meanROI4.MCCd.uni$Zc<0 & meanROI4.MCCd.uni$period=="post"), aes(x=Zc, fill= as.factor(injection)))+
+  geom_boxplot(alpha=.5)+
+  geom_vline(xintercept=0)+
+  facet_grid(session~monkey)+
+  scale_color_manual(values=c("black","orange"))+
+  scale_fill_manual(values=c("black","orange"))+
+  ggtitle("NEGATIVE Zc in POST-surgery MCCdbank//Unilat- all seeds all ROI together")+ theme(legend.position="bottom")
+#pos Zc
+b<- ggplot(subset(meanROI4.MCCd.uni,meanROI4.MCCd.uni$Zc>0& meanROI4.MCCd.uni$period=="post"), aes(x=Zc, fill= as.factor(injection)))+
+  geom_boxplot(alpha=.5)+
+  geom_vline(xintercept=0)+
+  facet_grid(session~monkey)+
+  scale_color_manual(values=c("black","orange"))+
+  scale_fill_manual(values=c("black","orange"))+
+  ggtitle("POSITIVE Zc in POST-surgery MCCdbank//Unilat- all seeds all ROI together")+ theme(legend.position="bottom")
+grid.arrange(a,b,ncol=2)
+
+
+a<- ggplot(subset(meanROI4.MCCd.uni,meanROI4.MCCd.uni$Zc<0 & meanROI4.MCCd.uni$period=="post"), aes(x=Zc, fill= as.factor(injection)))+
+  geom_boxplot(alpha=.5)+
+  geom_vline(xintercept=0)+
+  facet_grid(.~monkey)+
+  scale_color_manual(values=c("black","orange"))+
+  scale_fill_manual(values=c("black","orange"))+
+  ggtitle("NEGATIVE Zc in POST-surgery MCCdbank//Unilat- all seeds all ROI together")+ theme(legend.position="bottom")
+#pos Zc
+b<- ggplot(subset(meanROI4.MCCd.uni,meanROI4.MCCd.uni$Zc>0& meanROI4.MCCd.uni$period=="post"), aes(x=Zc, fill= as.factor(injection)))+
+  geom_boxplot(alpha=.5)+
+  geom_vline(xintercept=0)+
+  facet_grid(.~monkey)+
+  scale_color_manual(values=c("black","orange"))+
+  scale_fill_manual(values=c("black","orange"))+
+  ggtitle("POSITIVE Zc in POST-surgery MCCdbank//Unilat- all seeds all ROI together")+ theme(legend.position="bottom")
+grid.arrange(a,b,ncol=2)
+
+
+# stats on all MCCd seeds/ROI
+gmixt.Do.POST<- lme(Zc ~ injection , random=~1|session/RUN, data=subset(Donut.data, Donut.data$period=="post"))
+summary(gmixt.Do.POST)
+
+
+gmixt.Ho.POST<- lme(Zc ~ injection , random=~1|session/RUN, data=subset(Homer.data, Homer.data$period=="post"))
+summary(gmixt.Ho.POST)
+
+
+```
+
+
+```{r, message=FALSE, warning=FALSE,fig.height=5, fig.width=11}
+
+
+
+ggplot(meanROI4.MCCd.uni, aes(x=Zc, fill= as.factor(injection), colour= as.factor(injection)))+
+  geom_histogram(alpha=.5, position="identity")+
+  geom_vline(xintercept=0)+
+  facet_grid(period~monkey)+
+  scale_color_manual(values=c("black","orange"))+
+  scale_fill_manual(values=c("black","orange"))+
+  ggtitle(" Z between pre-post-surgery MCCdbank//Unilat- all seeds all ROI together")
+
+
+
+ggplot(meanROI4.MCCd.uni, aes(x=Zc, fill= as.factor(period)))+
+  geom_density(alpha=.5)+
+  geom_vline(xintercept=0)+
+  facet_grid(injection~monkey)+
+  scale_color_manual(values=c("black","green"))+
+  scale_fill_manual(values=c("black","green"))+
+  ggtitle(" Z between pre-post-surgery MCCdbank//Unilat- all seeds all ROI together")
+
+
+
+
+
+ggplot(meanROI4.MCCd.uni, aes(x=Zc, fill= as.factor(injection)))+
+  geom_boxplot(alpha=.5)+
+  geom_vline(xintercept=0)+
+  facet_grid(period~monkey)+
+  scale_color_manual(values=c("black","green"))+
+  scale_fill_manual(values=c("black","green"))+
+  ggtitle(" Z between pre-post-surgery MCCdbank//Unilat- all seeds all ROI together")
+
+```
+
+First let see if there is a variation of  differences by MCC seeds: 
+
+
+```{r, message=FALSE, warning=FALSE,fig.height=5, fig.width=11}
+
+ggplot(subset(meanROI4.MCCd.uni, monkey=="HOMER"), aes(x=Zc,fill= as.factor(injection), color=as.factor(injection)))+
+  geom_histogram(alpha=.6, position="identity")+
+  geom_vline(xintercept=0)+
+  facet_grid(period~as.factor(SeedYnorm))+
+  scale_color_manual(values=c("black","orange"))+
+   scale_fill_manual(values=c("black","orange"))+
+  ggtitle("HOMER: Zc pre-post-surgery MCCd//Unilat- all ROI- MCC antpost axis")
+
+ggplot(subset(meanROI4.MCCd.uni, monkey=="DONUT"), aes(x=Zc,fill= as.factor(injection), color=as.factor(injection)))+
+  geom_histogram(alpha=.6, position="identity")+
+  geom_vline(xintercept=0)+
+  facet_grid(period~as.factor(SeedYnorm))+
+  scale_color_manual(values=c("black","orange"))+
+   scale_fill_manual(values=c("black","orange"))+
+  ggtitle("DONUT: Zc pre-post-surgery MCCd//Unilat- all ROI- MCC antpost axis")
+
+#stats PRE chir
+gmixt.Do.PRE<- lme(Zc ~  as.factor(SeedYnorm)/injection , random=~1|session, data=subset(Donut.data, Donut.data$period=="pre"))
+summary(gmixt.Do.PRE)
+
+
+gmixt.Ho.PRE<- lme(Zc ~  as.factor(SeedYnorm)/injection  , random=~1|session, data=subset(Homer.data, Homer.data$period=="pre"))
+summary(gmixt.Ho.PRE)
+
+
+# stats POST chir
+gmixt.Do.POST<- lme(Zc ~ as.factor(SeedYnorm)/injection , random=~1|session, data=subset(Donut.data, Donut.data$period=="post"))
+summary(gmixt.Do.POST)
+
+
+gmixt.Ho.POST<- lme(Zc ~ as.factor(SeedYnorm)/injection  , random=~1|session, data=subset(Homer.data, Homer.data$period=="post"))
+summary(gmixt.Ho.POST)
+
+```
+
+Nothing significant
+
+Can we see  differences when we look at ROis:
+
+```{r, message=FALSE, warning=FALSE,fig.height=5, fig.width=11}
+  
+ggplot( subset(meanROI4.MCCd.uni, monkey=="DONUT") , aes(x=Zc,fill= as.factor(injection), color=as.factor(injection)))+
+  geom_density(alpha=.6)+
+  geom_vline(xintercept=0)+
+  facet_grid(period~ROI1)+
+  scale_color_manual(values=c("black","orange"))+
+   scale_fill_manual(values=c("black","orange"))+
+  ggtitle("DONUT MCC DORSAL: Distribution of Z pre-post-surgery//Unilat- for the different ROIs") + theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"),legend.position = "bottom")
+
+
+ggplot( subset(meanROI4.MCCd.uni, monkey=="HOMER") , aes(x=Zc,fill= as.factor(injection), color=as.factor(injection)))+
+  geom_density(alpha=.6)+
+  geom_vline(xintercept=0)+
+  facet_grid(period~ROI1)+
+  scale_color_manual(values=c("black","orange"))+
+   scale_fill_manual(values=c("black","orange"))+
+  ggtitle("HOMER MCC DORSAL: Distribution of Z pre-post-surgery//Unilat- for the different ROIs") + theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"),legend.position = "bottom")
+
+```
+
+
+## SUMMARY statistics MCCd-ROIs
+```{r, message=FALSE, warning=FALSE,fig.height=9, fig.width=11}
+glm.ROIperiod.preDo <- lme(Zc ~ ROI1 / injection, random=~1|session/RUN, data=subset(Donut.data, period =="post"))
+x <- summary(glm.ROIperiod.preDo)
+
+tabl <- data.frame(x$tTable[11:20,4:5],monkey="Donut",period="post",ROI=rownames(x$tTable)[11:20])
+
+glm.ROIperiod.postDo <- lme(Zc ~ ROI1 / injection, random=~1|session/RUN, data=subset(Donut.data, period =="pre"))
+x <- summary(glm.ROIperiod.postDo)
+
+tabl <- rbind(tabl,data.frame(x$tTable[11:20,4:5],monkey="Donut",period="pre",ROI=rownames(x$tTable)[11:20]))
+
+glm.ROIperiod.preHo <- lme(Zc ~ ROI1 / injection, random=~1|session/RUN, data=subset(Homer.data, period =="pre"))
+x <- summary(glm.ROIperiod.preHo)
+
+tabl <- rbind(tabl,data.frame(x$tTable[11:20,4:5],monkey="Homer",period="pre",ROI=rownames(x$tTable)[11:20]))
+
+glm.ROIperiod.postHo <- lme(Zc ~ ROI1 / injection, random=~1|session/RUN, data=subset(Homer.data, period =="post"))
+x <- summary(glm.ROIperiod.postHo)
+tabl <- rbind(tabl,data.frame(x$tTable[11:20,4:5],monkey="Homer",period="post",ROI=rownames(x$tTable)[11:20]))
+
+
+tabl$period <- factor(tabl$period, levels = c("pre", "post"))
+
+ggplot(subset(tabl, period=="post"), aes(x=ROI,y=t.value))+
+  geom_col(position="dodge",aes(fill= p.value<0.05))+
+  facet_grid(monkey~ as.factor(period))+
+  scale_fill_manual(values=c("FALSE"="blue","TRUE"="red"))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("T.values and sig for glmm testing DCZvs.Control for MCCd")
+
+```
+
+
+
+```{r, message=FALSE, warning=FALSE,fig.height=9, fig.width=11}
+  # test comparing pre-post en DCZ to check whther DCZ post gives something different.
+glm.ROI.prepostDCZHo <- lme(Zc ~ ROI1 / period, random=~1|session/RUN, data=subset(Homer.data, injection =="DCZ"))
+x <- summary(glm.ROI.prepostDCZHo)
+
+tabl2 <- data.frame(x$tTable[11:20,4:5],monkey="Homer",injection="DCZ",ROI=rownames(x$tTable)[11:20])
+
+
+glm.ROI.prepostDCZDo <- lme(Zc ~ ROI1 / period, random=~1|session/RUN, data=subset(Donut.data, injection =="DCZ"))
+x <- summary(glm.ROI.prepostDCZDo)
+
+tabl2 <- rbind(tabl2,data.frame(x$tTable[11:20,4:5],monkey="Donut",injection="DCZ",ROI=rownames(x$tTable)[11:20]))
+
+
+ggplot( tabl2 , aes(x=ROI,y=t.value))+
+  geom_col(position="dodge",aes(fill= p.value<0.05))+
+  facet_grid(monkey~ injection)+
+  scale_fill_manual(values=c("FALSE"="blue","TRUE"="red"))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("T.values and sig for glmm testing pre vs. post under DCZ for MCCd")
+
+
+```
+
+The analysis shows an effect of DCZ vs control post-surgery on relevant frontal regions as well as between DCZ condition spre vs post-.
+
+we boxplot the data. The idea here is to seek the differential on PS regions compared to other regions.
+
+```{r, message=FALSE, warning=FALSE,fig.height=5, fig.width=11}
+
+
+
+for (mk in 1:length(mkey)){
+  
+plot <- ggplot(subset(meanROI4.MCCd.uni,monkey==mkey[mk]), aes(x= injection, y=Zc, fill=injection))+
+  geom_boxplot()+
+  facet_grid( period ~ROI1, scales = "free_x")+
+  scale_color_manual(values=c("black","orange"))+
+   scale_fill_manual(values=c("black","orange"))+
+   ylab("Zc")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle(paste0(mkey[mk],": correlations between MCC seeds and ROIs"))
+ print(plot) 
+}
+
+meanROI5.uni <- aggregate(Zc ~ SeedYnorm + ROI1 + monkey + injection+ period  + seeds.MCC, data= meanROI4.MCCd.uni, mean)
+
+
+ggplot(subset(meanROI5.uni, monkey=="HOMER"), aes(x=SeedYnorm, y=Zc, colour=as.factor(injection)))+
+  geom_line(size=1)+
+  facet_grid(seeds.MCC * period~ ROI1, scales = "free_x")+
+  scale_color_manual(values=c("black", "gold2", "gold3","chartreuse2","chartreuse4"))+
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"))+
+  ggtitle(" HOMER RH raw")+ theme(legend.position = "right")
+ 
+
+ggplot(subset(meanROI5.uni, monkey=="DONUT"), aes(x=SeedYnorm, y=Zc, colour=as.factor(injection)))+
+  geom_line(size=1)+
+  facet_grid(seeds.MCC * period~ ROI1, scales = "free_x")+
+  scale_color_manual(values=c("black", "gold2", "gold3","chartreuse2","chartreuse4"))+
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"))+
+  ggtitle(" DONUT LH raw")+ theme(legend.position = "right")
+
+## figures linked to stats above:
+
+
+ggplot(subset(meanROI5.uni, period=="post"), aes(x=SeedYnorm, y=Zc, colour=as.factor(injection)))+
+  geom_line(size=1)+
+  facet_grid(monkey * period~ ROI1, scales = "free_x")+
+  scale_color_manual(values=c("black", "gold2", "gold3","chartreuse2","chartreuse4"))+
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"))+
+  ggtitle(" dMCC Control vs. DCZ post-surgery")+ theme(legend.position = "right")
+
+
+ggplot(subset(meanROI5.uni, injection=="DCZ"), aes(x=SeedYnorm, y=Zc, colour=as.factor(period)))+
+  geom_line(size=1)+
+  facet_grid(monkey ~ ROI1, scales = "free_x")+
+  scale_color_manual(values=c("chartreuse4", "firebrick2"))+
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"))+
+  ggtitle(" DCZ pre vs post")+ theme(legend.position = "right")
+```
+
+if one looks across the ant-post axis of MCC then the effect for Homer looks quite general. 
+
+
+```{r , message=FALSE, warning=FALSE, include=T,fig.height=5, fig.width=9, echo=FALSE}
+## let see with the data referenced to pre 0 Arc Gen data
+## this is still on data for RUNs 3 to 5, unilateral
+##////// THIS NEEDS TO BE REVISED TO CHANGE THE REF per period
+
+meanROI4.MCCd.uni$Zcref <- meanROI4.MCCd.uni$Zc
+
+xx =levels(meanROI4.MCCd.uni$ROI1)
+
+for (mk in 1:length(mkey)){ 
+  mkey[mk]
+  
+  for (see in 1:length(seeds.MCC)){
+    seeds.MCC[see]
+    
+    for (r1 in 1:length(xx)){
+      xx[r1]
+      meanROI4.MCCd.uni$Zcref[meanROI4.MCCd.uni$ROI1== xx[r1] & meanROI4.MCCd.uni$seeds.MCC==seeds.MCC[see] & meanROI4.MCCd.uni$monkey == mkey[mk]] <- meanROI4.MCCd.uni$Zc[meanROI4.MCCd.uni$ROI1== xx[r1]& meanROI4.MCCd.uni$seeds.MCC==seeds.MCC[see]& meanROI4.MCCd.uni$monkey == mkey[mk]] - mean(meanROI4.MCCd.uni$Zc[meanROI4.MCCd.uni$SeedYnorm<4 & meanROI4.MCCd.uni$seeds.MCC==seeds.MCC[see] & meanROI4.MCCd.uni$ROI1== xx[r1] & meanROI4.MCCd.uni$monkey == mkey[mk]])
+      
+    }
+  }
+}
+
+meanROI5ref.uni <- aggregate(Zcref ~ SeedYnorm + ROI1 + monkey +injection + period + seeds.MCC, data= meanROI4.MCCd.uni, mean)
+
+ggplot(subset(meanROI5ref.uni, period=="post"), aes(x=SeedYnorm, y=Zcref, colour=as.factor(injection)))+
+  geom_line(size=1)+
+  facet_grid(monkey ~ ROI1, scales = "free_x")+
+  scale_color_manual(values=c("black",  "gold3","chartreuse2","chartreuse4"))+
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"))+
+  ggtitle(" dMCC pre vs. post  -  data referenced to posterior dMCC")+ theme(legend.position = "right")
+ 
+
+
+ggplot(subset(meanROI5ref.uni, injection=="DCZ"), aes(x=SeedYnorm, y=Zcref, colour=as.factor(period)))+
+  geom_line(size=1)+
+  facet_grid(monkey ~ ROI1, scales = "free_x")+
+  scale_color_manual(values=c("chartreuse4", "firebrick2"))+
+  theme(legend.key.height = unit(.5,"line"), legend.key.width = unit(2,"line"))+
+  ggtitle(" DCZ pre vs post -  data referenced to posterior dMCC")+ theme(legend.position = "right")
+```
+
+
+
+## Look at PS and MCCd specific data
+
+We opt here to remove session 1 and run 1 from the data.
+
+
+```{r , message=FALSE, warning=FALSE, include=T,fig.height=5, fig.width=9, echo=FALSE}
+
+#here to select only the PS and MCCd data
+ALL.PS.DATA <- subset(MAIN3,  RUN>1)
+#ALL.PS.DATA <- subset(MAIN3,  RUN>1)
+
+ HOMER4.psR <- subset(ALL.PS.DATA, monkey=="HOMER" & hemisph=="RH" )
+ DONUT4.psL <- subset(ALL.PS.DATA, monkey=="DONUT" & hemisph=="LH" )
+ ALL.PS.DATA <- rbind(HOMER4.psR, DONUT4.psL)
+
+
+#here to 
+inPS4 <- aggregate(Zc ~ SeedYnorm + seeds.MCC + ROI1+ ROIynorm + session + injection + monkey  + hemisph, data = ALL.PS.DATA, mean)
+
+inPS4$period <- inPS4$session
+inPS4$period[inPS4$period < 5] <- 1
+inPS4$period[inPS4$period >= 5] <- 2
+inPS4$period <- factor(inPS4$period, levels = c("1","2"), labels=c("Pre-chir","Post-chir"))
+
+HOMER4.psR <- subset(inPS4, monkey=="HOMER" & hemisph=="RH" )
+DONUT4.psL <- subset(inPS4, monkey=="DONUT" & hemisph=="LH" )
+inPS4.uni <- rbind(HOMER4.psR, DONUT4.psL)
+
+inPS4.uni$ROI1 <- factor(inPS4.uni$ROI1, levels=c("BA","SEF","FEF","M1face","M1hand","PS_c","PS_d","PS_f","PS_v","PS_r"))
+
+
+#-------------------
+
+
+ggplot(inPS4.uni, aes(x=Zc,colour=as.factor(ROIynorm)))+
+  geom_density(size=1)+
+facet_grid(period*session ~ monkey*injection, scales = "free_y")+
+  geom_vline(xintercept=0, linetype="dashed",color="black")+
+    scale_color_manual("Ant. Levels in PS",values=c("goldenrod","goldenrod1","goldenrod2",
+                                "goldenrod3","goldenrod4","firebrick","firebrick1","firebrick2","firebrick3","firebrick4","red"))+
+     theme(plot.title = element_text(lineheight=.6, face="bold", size= 11 ))+
+  scale_y_continuous(name="Coorrelation Z")+
+   scale_x_continuous(name="Zc")+
+  ggtitle("Target hemispheres: distribution of correlation strengths between MCC and PS ")
+
+
+
+ggplot(inPS4.uni, aes(x=Zc,colour=as.factor(ROIynorm)))+
+  geom_density(size=1)+
+facet_grid(period*monkey~seeds.MCC*injection, scales = "free_y")+
+  geom_vline(xintercept=0, linetype="dashed",color="black")+
+    scale_color_manual("Ant. Levels in PS",values=c("goldenrod","goldenrod1","goldenrod2",
+                                "goldenrod3","goldenrod4","firebrick","firebrick1","firebrick2","firebrick3","firebrick4","red"))+
+     theme(plot.title = element_text(lineheight=.6, face="bold", size= 11 ))+
+  scale_y_continuous(name="Coorrelation Z")+
+   scale_x_continuous(name="Zc")+
+  ggtitle("Target hemispheres: distribution of correlation strengths between MCC and PS ")
+
+
+
+for (mk in 1:length(mkey)){
+  
+plot <- ggplot(subset(inPS4.uni,monkey==mkey[mk] & seeds.MCC=="MCC_DORSALBANK_SEEDS"), aes(x=as.factor(SeedYnorm), y=as.factor(ROIynorm), fill=Zc))+
+  geom_tile()+
+  facet_grid(ROI1 ~ period * injection, scales = "free_x")+
+ scale_fill_gradient2(low = "dark blue", high = "red", mid = "white", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle(paste0(mkey[mk],": correlations between MCC seeds and dorsal,ventral and fundus PS"))
+ print(plot) 
+}
+
+
+#----------------------------------------------------
+#FOCUS on PS-d and PS-c
+  
+a <- ggplot(subset(inPS4.uni, monkey=="HOMER" &  seeds.MCC=="MCC_DORSALBANK_SEEDS" & ROI1=="PS_d"), aes(x=as.factor(SeedYnorm), y=as.factor(ROIynorm), fill=Zc))+
+  geom_tile()+
+  facet_grid(injection ~ monkey*period, scales = "free_x")+
+ scale_fill_gradient2(low = "dark blue", high = "red", mid = "white", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle("HOMER: correlations between MCCd seeds and  PSdorsal")
+
+b <- ggplot(subset(inPS4.uni,  monkey=="DONUT" &  seeds.MCC=="MCC_DORSALBANK_SEEDS"& ROI1=="PS_d"), aes(x=as.factor(SeedYnorm), y=as.factor(ROIynorm), fill=Zc))+
+  geom_tile()+
+  facet_grid(injection ~ monkey*period, scales = "free_x")+
+ scale_fill_gradient2(low = "dark blue", high = "red", mid = "white", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle("DONUT : correlations between MCCd seeds and PS dorsal")
+
+grid.arrange(a,b, ncol=2)
+
+
+
+
+# boxplot ON PRINCIPALIS a-p axis
+
+ggplot(subset(inPS4.uni,seeds.MCC=="MCC_DORSALBANK_SEEDS" & ROI1=="PS_c"), aes( x=as.factor(ROIynorm), y = Zc,  fill=injection))+
+  geom_boxplot()+
+  facet_grid(period ~ monkey, scales = "free_x")+
+   scale_fill_manual(values=c("grey", "darkred")) +
+   xlab("Seed Y axis coordinate in PRINCIPALIS")+
+  ggtitle("correlations between MCCd seeds and PS caudal")
+
+ggplot(subset(inPS4.uni,seeds.MCC=="MCC_DORSALBANK_SEEDS" & ROI1=="PS_d"), aes( x=as.factor(ROIynorm), y = Zc, fill=injection))+
+  geom_boxplot()+
+  facet_grid(period ~ monkey, scales = "free_x")+
+   scale_fill_manual(values=c("grey", "darkred")) +
+   xlab("Seed Y axis coordinate in PRINCIPALIS")+
+  ggtitle("correlations between MCCd seeds and PS dorsal")
+
+ggplot(subset(inPS4.uni,seeds.MCC=="MCC_DORSALBANK_SEEDS" & ROI1=="PS_f"), aes( x=as.factor(ROIynorm), y = Zc,  fill=injection))+
+  geom_boxplot()+
+  facet_grid(period ~ monkey, scales = "free_x")+
+   scale_fill_manual(values=c("grey", "darkred")) +
+   xlab("Seed Y axis coordinate in PRINCIPALIS")+
+  ggtitle("correlations between MCCd seeds and PS fundus")
+
+
+ggplot(subset(inPS4.uni,seeds.MCC=="MCC_DORSALBANK_SEEDS" & ROI1=="PS_v"), aes( x=as.factor(ROIynorm), y = Zc,  fill=injection))+
+  geom_boxplot()+
+  facet_grid(period ~ monkey, scales = "free_x")+
+   scale_fill_manual(values=c("grey", "darkred")) +
+   xlab("Seed Y axis coordinate in PRINCIPALIS")+
+  ggtitle("correlations between MCCd seeds and PS ventral")
+
+
+# box plot on Cingulate a-p axis
+
+
+ggplot(subset(inPS4.uni,seeds.MCC=="MCC_DORSALBANK_SEEDS" & ROI1=="PS_d"), aes( x=as.factor(SeedYnorm), y = Zc, fill=injection))+
+  geom_boxplot()+
+  facet_grid(period ~ monkey, scales = "free_x")+
+   scale_fill_manual(values=c("grey", "darkred")) +
+   xlab("Seed Y axis coordinate in CINGULATE")+
+  ggtitle("correlations between MCCd seeds and PS dorsal")
+
+ggplot(subset(inPS4.uni,seeds.MCC=="MCC_DORSALBANK_SEEDS" & ROI1=="PS_c"), aes( x=as.factor(SeedYnorm), y = Zc,  fill=injection))+
+  geom_boxplot()+
+  facet_grid(period ~ monkey, scales = "free_x")+
+   scale_fill_manual(values=c("grey", "darkred")) +
+   xlab("Seed Y axis coordinate in CINGULATE")+
+  ggtitle("correlations between MCCd seeds and PS caudal")
+
+ggplot(subset(inPS4.uni,seeds.MCC=="MCC_DORSALBANK_SEEDS" & ROI1=="PS_f"), aes( x=as.factor(SeedYnorm), y = Zc,  fill=injection))+
+  geom_boxplot()+
+  facet_grid(period ~ monkey, scales = "free_x")+
+   scale_fill_manual(values=c("grey", "darkred")) +
+   xlab("Seed Y axis coordinate in CINGULATE")+
+  ggtitle("correlations between MCCd seeds and PS fundus")
+
+
+ggplot(subset(inPS4.uni,seeds.MCC=="MCC_DORSALBANK_SEEDS" & ROI1=="PS_v"), aes( x=as.factor(SeedYnorm), y = Zc,  fill=injection))+
+  geom_boxplot()+
+  facet_grid(period ~ monkey, scales = "free_x")+
+   scale_fill_manual(values=c("grey", "darkred")) +
+   xlab("Seed Y axis coordinate in CINGULATE")+
+  ggtitle("correlations between MCCd seeds and PS ventral")
+
+
+
+
+
+ggplot(subset(inPS4.uni, seeds.MCC=="MCC_DORSALBANK_SEEDS"), aes( x=as.factor(ROI1), y = Zc, fill=injection))+
+  geom_boxplot()+
+  facet_grid(period ~ monkey, scales = "free_x")+
+ scale_fill_manual(values=c("grey", "darkred")) +
+   ylab("Zc")+
+   xlab("ROI in principalis")+
+  ggtitle("Correlations between MCCd seeds and PS regions of interest")
+
+
+
+#-----------MCC FUNDUS
+
+a <- ggplot(subset(inPS4.uni, monkey=="HOMER" &  seeds.MCC=="MCC_FUNDUS_SEEDS"), aes(x=as.factor(SeedYnorm), y=as.factor(ROIynorm), fill=Zc))+
+  geom_tile()+
+  facet_grid(injection ~ monkey*period, scales = "free_x")+
+ scale_fill_gradient2(low = "dark blue", high = "red", mid = "white", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle("HOMER: correlations between MCCf seeds and dorsal,ventral and fundus PS")
+
+b <- ggplot(subset(inPS4.uni,  monkey=="DONUT" &  seeds.MCC=="MCC_FUNDUS_SEEDS"), aes(x=as.factor(SeedYnorm), y=as.factor(ROIynorm), fill=Zc))+
+  geom_tile()+
+  facet_grid(injection ~ monkey*period, scales = "free_x")+
+ scale_fill_gradient2(low = "dark blue", high = "red", mid = "white", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle("DONUT : correlations between MCCf seeds and dorsal,ventral and fundus PS")
+
+grid.arrange(a,b, ncol=2)
+
+
+
+#-----------VENTRAL MCC
+
+a <- ggplot(subset(inPS4.uni, monkey=="HOMER" &  seeds.MCC=="MCC_VENTRALBANK_SEEDS"), aes(x=as.factor(SeedYnorm), y=as.factor(ROIynorm), fill=Zc))+
+  geom_tile()+
+  facet_grid(injection ~ monkey*period, scales = "free_x")+
+ scale_fill_gradient2(low = "dark blue", high = "red", mid = "white", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle("HOMER: correlations between MCCv seeds and dorsal,ventral and fundus PS")
+
+b <- ggplot(subset(inPS4.uni,  monkey=="DONUT" &  seeds.MCC=="MCC_VENTRALBANK_SEEDS"), aes(x=as.factor(SeedYnorm), y=as.factor(ROIynorm), fill=Zc))+
+  geom_tile()+
+  facet_grid(injection ~ monkey*period, scales = "free_x")+
+ scale_fill_gradient2(low = "dark blue", high = "red", mid = "white", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle("DONUT : correlations between MCCv seeds and dorsal,ventral and fundus PS")
+
+grid.arrange(a,b, ncol=2)
+
+```
+
+## SUMMARY statistics MCCd-PS
+Work on the stat to test whether correlations between MCCd and regions in PS are modulated by DCZ.
+
+
+```{r, message=FALSE, warning=FALSE,fig.height=9, fig.width=9}
+
+#here to select only the PS and MCCd data
+ALL.PS.DATA <- subset(MAIN3, RUN>1)
+
+ HOMER4.psR <- subset(ALL.PS.DATA, monkey=="HOMER" & hemisph=="RH" )
+ DONUT4.psL <- subset(ALL.PS.DATA, monkey=="DONUT" & hemisph=="LH" )
+ ALL.PS.DATA <- rbind(HOMER4.psR, DONUT4.psL)
+
+inPS4 <- aggregate(Zc ~ SeedYnorm + seeds.MCC + ROI1+ ROIynorm + session + RUN + injection + monkey, data = ALL.PS.DATA, mean)
+
+inPS4$period <- inPS4$session
+inPS4$period[inPS4$period < 5] <- 1
+inPS4$period[inPS4$period >= 5] <- 2
+inPS4$period <- factor(inPS4$period, levels = c("1","2"), labels=c("Pre-chir","Post-chir"))
+
+HOMER4.psR <- subset(inPS4, monkey=="HOMER" & hemisph=="RH" )
+DONUT4.psL <- subset(inPS4, monkey=="DONUT" & hemisph=="LH" )
+inPS4.uni <- rbind(HOMER4.psR, DONUT4.psL)
+
+inPS4.uni$ROI1 <- factor(inPS4.uni$ROI1, levels=c("BA","SEF","FEF","M1face","M1hand","PS_c","PS_d","PS_f","PS_v","PS_r"))
+
+
+
+#tests---
+
+
+x <- summary(lme(Zc ~ SeedYnorm * ROIynorm * injection , random=~1|session/RUN, data=subset (inPS4.uni, monkey == "HOMER" & period == "Post-chir")))
+ 
+tabl <- data.frame(x$tTable[2:8,4:5],monkey="HOMER", period="post", ID=rownames(x$tTable)[2:8])
+
+x2 <- summary(lme(Zc ~ SeedYnorm * ROIynorm * injection , random=~1|session/RUN, data=subset (inPS4.uni, monkey == "DONUT" & period == "Post-chir")))
+
+tabl <- rbind(tabl,data.frame(x2$tTable[2:8,4:5],monkey="DONUT", period="post", ID=rownames(x$tTable)[2:8]))
+
+
+ggplot(tabl, aes(x=ID,y=t.value))+
+  geom_col(position="dodge",aes(fill= p.value < 0.05))+
+  facet_grid(monkey*period~ .)+
+  scale_fill_manual(values=c("FALSE"="blue","TRUE"="red"))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("T.values and sig (p<0.05) for glmm testing DCZvs.Control for MCCd")
+
+```
+
+
+Looking at the entire average doesn't not provide clear results on potential differences between test sessions and pre-op
+
+
+```{r, fig.height=5, fig.width=11}
+
+inPS5.uni <- subset(inPS4.uni, seeds.MCC=="MCC_DORSALBANK_SEEDS"  & ROI1!= "PS_r")
+
+ ggplot(subset(inPS5.uni,monkey=="HOMER"), aes(x=SeedYnorm, y=ROIynorm,fill=Zc))+
+  geom_raster()+
+  facet_grid(ROI1 ~period*injection, scales = "free_x")+
+scale_fill_gradient2(low = "dodgerblue3", high = "darkorange3", mid = "white", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle("HOMER: correlations between MCCd and PS")+
+   theme(panel.background = element_rect(fill = "grey16",
+                                colour = "grey16",
+                                size = 0.5, linetype = "solid"),
+         plot.background = element_rect(fill = "grey16"),
+         legend.background = element_rect(fill = "grey16"),
+         legend.text = element_text(colour = "white"),
+         axis.text.x = element_text( colour = "white"), 
+         axis.text.y = element_text( colour = "white"),
+         axis.title.x = element_text(colour = "dodgerblue2"),
+         axis.title.y = element_text(colour = "dodgerblue2"),
+        title = element_text(colour = "orange"))
+
+
+ ggplot(subset(inPS5.uni,monkey=="DONUT"), aes(x=SeedYnorm, y=ROIynorm,fill=Zc))+
+  geom_raster()+
+  facet_grid(ROI1 ~ period*injection, scales = "free_x")+
+scale_fill_gradient2(low = "dodgerblue3", high = "darkorange3", mid = "white", 
+   midpoint = 0,  space = "Lab",
+   name="Zcorr value") +
+   ylab("Anterior in PSulcus")+
+   xlab("Seed Y axis coordinate in MCC")+
+  ggtitle("DONUT: correlations between MCCd and PS")+
+   theme(panel.background = element_rect(fill = "grey16",
+                                colour = "grey16",
+                                size = 0.5, linetype = "solid"),
+         plot.background = element_rect(fill = "grey16"),
+         legend.background = element_rect(fill = "grey16"),
+         legend.text = element_text(colour = "white"),
+         axis.text.x = element_text( colour = "white"), 
+         axis.text.y = element_text( colour = "white"),
+         axis.title.x = element_text(colour = "dodgerblue2"),
+         axis.title.y = element_text(colour = "dodgerblue2"),
+        title = element_text(colour = "orange"))
+
+```
+
+
+#Other approaches to DREADDS effects
+
+THe first analyses were targeting the MCC-LFPC functionnal connectivity because of the path selective targets. But it could be that activating HM3D receptors with DCZ on the MCC to LPFC neurons would only impact LPFC neurons not the MCC-LPFC correlation. They could also impact LPFC activity and the network connected with LPFC.
+
+So here we start new analyses. Looking first at activity from the regions themselves. As a 1st trial we look at within MCC activity (because at the present time this is the data I have). We will look at activity using the Autocorrelogrm measures, taken from the analyses previously developped for the timescale analyses in *"C:\Users\eproc\Dropbox\Main_drop\R\MRI\RSN_MCC_principalis\MCC_LPFC_rsn_V1.Rmd"*.
+
+
+## MCC timeseries autocorr
+
+Activity from MCC seeds are on the form of time series in the ..\Seeds directories in DONUT_RUN1_MCCY*0*.1D  files in the MRI data directory. 
+So let's first load the data.
+
+
+```{r loadtimeseries, eval=FALSE, include=FALSE}
+# nbrun <- 5
+# mkey <- c('HOMER','DONUT')
+# maxseedy <- c(16,18) # max seed MCCy for the each monke
+# seeds.MCC <- c('MCC_DORSALBANK_SEEDS','MCC_FUNDUS_SEEDS','MCC_VENTRALBANK_SEEDS')
+# hemisph <- c('LH','RH')
+# 
+# sessionMax <- 8
+# 
+# MAIN1D <- data.frame()
+#   
+#   
+# for (mk in 1:length(mkey)){
+#   
+#     for (session in 2:sessionMax){
+#           sub.MAIN <- data.frame()
+#       for (hem in 1:2){
+#         for (see in 1:length(seeds.MCC)){
+#           
+#           path2 <- paste0(path,mkey[mk],'/',mkey[mk],'_',session,'/',seeds.MCC[see],'_',hemisph[hem],'/Seeds/')
+#           disp(path2)
+# 
+#          for (ru in 2: nbrun){
+#           for(seedy in seq(0,maxseedy[mk],2)){
+#   
+#                 file2 <- paste0(mkey[mk],'_RUN',ru,'_MCCY',seedy,'.1D')
+#                 input <- read.table(paste0(path2,file2))
+#                 
+#                 input$RUN <- ru
+#                 input$tr <- seq(1:nrow(input))
+#                 input$session <- session
+#                 input$monkey <- mkey[mk]
+#                 input$hemisph <- hemisph[hem]
+#                 input$seedMCC <- seeds.MCC[see]
+#                 input$seedy <- seedy
+#                 
+#                 sub.MAIN <- rbind(sub.MAIN, input)
+#              }
+#             }
+#             
+#           }
+#           
+#       }
+#            MAIN1D <- rbind(MAIN1D, sub.MAIN)
+#         } 
+#        
+#       }
+
+```
+
+Now that we have the data we can proceed with calculating the autocorrelogram and different measures related to them.
+
+```{r autoc, echo=FALSE, include=FALSE}
+
+#  AUTOCORR = data.frame()
+# 
+#   for (mk in 1:length(mkey)){
+#     for (session in 2:sessionMax){
+#       for (hem in 1:2){
+#         for (seed in 1:length(seeds.MCC)){
+#           for(seedy in seq(0,maxseedy[mk],2)){
+# 
+# test <- data.frame('bold'=MAIN1D$V1[MAIN1D$monkey==mkey[mk] & MAIN1D$session==session & MAIN1D$hemisph==hemisph[hem] & MAIN1D$seedMCC==seeds.MCC[seed]& MAIN1D$seedy== seedy],
+#              'tr'= MAIN1D$tr[MAIN1D$monkey==mkey[mk] & MAIN1D$session==session & MAIN1D$hemisph==hemisph[hem] 
+#                              & MAIN1D$seedMCC==seeds.MCC[seed]& MAIN1D$seedy== seedy])
+# 
+# autoc <- acf(test$bold, plot=FALSE)
+# 
+# data.autoc <- data.frame("acf"=autoc$acf, "lag"=autoc$lag, "seed.MCC"=seeds.MCC[seed], "monkey"=mkey[mk],
+#                          "hemisph"=hemisph[hem], "session"=session, "seedy"=seedy)
+# 
+#  AUTOCORR <- rbind(AUTOCORR, data.autoc)
+#         }
+#         }
+#       }
+#       
+#     }
+#   }
+# 
+# ggplot(subset(AUTOCORR, session>1 & seed.MCC=="MCC_DORSALBANK_SEEDS"), aes(lag,acf, color=as.factor(seedy)))+
+#   geom_line()+
+#   facet_grid(monkey~session*hemisph)+
+#   ggtitle("Autocorr")
+# 
+# 
+# ggplot(subset(AUTOCORR, monkey=="HOMER" & session>1 & seed.MCC=="MCC_DORSALBANK_SEEDS"), aes(lag,acf, color=as.factor(session)))+
+#   geom_line()+
+#   facet_grid(hemisph~seedy)+
+#   ggtitle(paste("HOMER autocorrelograms in MCCd"))
+# 
+# 
+# AUTOCORR$session2 <-AUTOCORR$session
+# AUTOCORR$session2[AUTOCORR$session2<5] <- "Preop"
+# 
+# mean_seedy = aggregate(acf~lag+monkey+hemisph+seed.MCC+session2, data=AUTOCORR, mean)
+# 
+# 
+# 
+# 
+# ggplot(subset(mean_seedy, seed.MCC=="MCC_DORSALBANK_SEEDS"), aes(lag,acf, color=as.factor(session2)))+
+#   geom_line(size=1)+
+#   facet_grid(hemisph~monkey)+
+#   scale_colour_manual(values=c("Red","chartreuse2","chartreuse4","darkred","black"))+
+#   ggtitle(paste("Average autocorrelograms in MCCd"))
+
+```
+
+We do not observe much in the autocorrelogram average for the different seedy.
+Not sure this is a interesting way to look at data in MCC.
+
+We can also extract the timescale from each autocorrelogram.
+
+```{r Tau, echo=FALSE, include=FALSE}
+
+# to calculate the integral before the first negative value:
+## find the first neg value
+# 
+# Fst.neg = autoc$lag[autoc$acf<0][1]
+# 
+# Tau <- (sum(autoc$acf[1:Fst.neg])-1)*1.7   # calculates the Tau : we remove the first autoc value, take the sum of values before the crossing of ordinates, and then multiply by the TR (1.7 sec)
+# 
+# ggplot(AUTOCORR, aes(lag,acf))+
+#   geom_col(fill="chartreuse4")+
+#   geom_line(aes(x = lag,y=lowess(acf,f=1/4)$y))+
+#   geom_vline(xintercept=Fst.neg-.5, size=.7,colour="red", linetype='dashed')+
+#   facet_grid(monkey~session*seed.MCC)+
+#   ggtitle(paste("Timescale for this example Tau = ",Tau))
+
+
+```
+
+### All brain ROI data
+
+
+
