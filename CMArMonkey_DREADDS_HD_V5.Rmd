@@ -77,15 +77,15 @@ library(nlme)
 
 if (Sys.info()["nodename"] == "PC_MANU_ATIV9"){
   path <-   "D://DREADDS/"
-  pathout <- "C://Users/eprocyk/Dropbox/Main_drop/R/MRI/CMAs_RSN/CMAr DREADDs/"
+  pathout <- "C://Users/eprocyk/Dropbox/Main_drop/R/MRI/CMAs_RSN/CMAr DREADDs/DREADDPath/"
   
 }else if(Sys.info()["nodename"] =="DESKTOP-MANU"){
    path <-  "E://DREADDS/CHARM-SARM_ATLAS_SPACE/"
-   pathout <- "C://Users/E Procyk/Dropbox/Main_drop/R/MRI/CMAs_RSN/CMAr DREADDs/"
+   pathout <- "C://Users/E Procyk/Dropbox/Main_drop/R/MRI/CMAs_RSN/CMAr DREADDs/DREADDPath/"
 
 }else if(Sys.info()["nodename"] =="DESKTOP-1OC9B4K"){
    path <-  "E://DREADDS/"
-   pathout <- "E://MANU_Portable/R/CMAr DREADDs"
+   pathout <- "E://MANU_Portable/R/CMAr DREADDs/DREADDPath/"
    
 }else{
   path  <-  "F://DREADDS/"
