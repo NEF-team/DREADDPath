@@ -51,7 +51,7 @@ recode2 <- function ( data, fields, recodes ) {
 regenerate = FALSE
 
 
-pathout <- "C://Users/E Procyk/Dropbox/Main_drop/R/MRI/CMAs_RSN/CMAr DREADDs/"
+pathout <- "C://Users/E Procyk/Dropbox/Main_drop/R/MRI/CMAs_RSN/CMAr DREADDs/DREADDPath/"
 session_type <- read.table(paste0(pathout,"DCZInjectionSchedule.txt"), header=TRUE)
 
 session_type$period <- as.factor(session_type$period)
