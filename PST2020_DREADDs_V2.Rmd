@@ -43,12 +43,8 @@ if (Sys.info()["nodename"] == "PC_MANU_ATIV9"){
   pathout <- "C://Users/eprocyk/Dropbox/Main_drop/R/Diverse_stuff/PST2020/"
   
 }else if(Sys.info()["nodename"] =="DESKTOP-MANU"){
-   path <-  "C://Users/E Procyk/Dropbox/Main_drop/R/Diverse_stuff/PST2020/"
-   pathout <- "C://Users/E Procyk/Dropbox/Main_drop/R/Diverse_stuff/PST2020/"
-
-}else if(Sys.info()["nodename"] =="DESKTOP-1OC9B4K"){
-   path <-  "C://Users/eproc/Dropbox/Main_drop/R/Diverse_stuff/PST2020/"
-   pathout <- "C://Users/eproc/Dropbox/Main_drop/R/Diverse_stuff/PST2020/"
+   path <-  "C://Users/E Procyk/Dropbox/Main_drop/R/MRI/CMAs_RSN/CMAr DREADDs/DREADDPath/"
+   pathout <- "C://Users/E Procyk/Dropbox/Main_drop/R/MRI/CMAs_RSN/CMAr DREADDs/DREADDPath/"
    
 }else{
   path  <-  "C://Users/E Procyk/Dropbox/Main_drop/R/Diverse_stuff/PST2020/"
@@ -96,7 +92,7 @@ Codes used for target chosen and repeats or miss reflect the position of the cho
 
 # first thin g is to remove the 99 from the data and save that in a second data frame
 
-data4R_99 <- data4R
+data4R_99 <- data4R # used for pause analyses
 data4R <- subset(data4R, data4R$choice!=99)
 
 
@@ -106,6 +102,11 @@ data4R$choice_pos <- data4R$choice/abs(data4R$choice)
 data4R$singe <- factor(data4R$singe)
 levels(data4R$singe) <- list(Tim="1",Vampire="2",Vassell="3",Winky="4",Zap="5",
                                           Dali="6",Homer="7",Donut="8", Oscar="9",Yuri="10", Violette="11")
+data4R_99$singe <- factor(data4R_99$singe)
+levels(data4R_99$singe) <- list(Tim="1",Vampire="2",Vassell="3",Winky="4",Zap="5",
+                                          Dali="6",Homer="7",Donut="8", Oscar="9",Yuri="10", Violette="11")
+
+
 data4R <- data4R[data4R$choice!=0,]
 # 
 data4R$condition <- as.factor(data4R$condition)
@@ -119,13 +120,15 @@ data4R$portes[data4R$condition=="TEST"] <- "blue"
 
 data4R$choice_type <- data4R$choice
 data4R$choice_type[data4R$choice_pos<0 & abs(data4R$choice)<99] <- "Repeat"
-data4R$choice_type[data4R$choice>99] <- "Miss"
+data4R$choice_type[data4R$choice>99] <- "Miss"  # this could maybe be called "Pass" instead
 data4R$choice_type[data4R$choice_pos>0 & abs(data4R$choice)<99] <- "Correct"
 data4R$choice_type <- as.factor(data4R$choice_type)
 
 data4R <- na.omit(data4R) # remove remaining NA
 
 data4R$Injection <- 0
+
+data4R_99$Injection <- 0
 
 # Format data-
 # here we want to look at variance in choices - in successive choices
@@ -168,6 +171,28 @@ YURI$Injection <- as.factor(YURI$Injection)
 HOMER$portes <- factor(HOMER$portes, levels = c("clear", "blue"))
 DONUT$portes <- factor(DONUT$portes, levels = c("clear", "blue"))
 YURI$portes <- factor(YURI$portes, levels = c("clear", "blue"))
+
+# Single monkey specifics - pauses
+HOMER_99 <- subset(data4R_99,data4R_99$singe=='Homer')
+DONUT_99 <- subset(data4R_99,data4R_99$singe=='Donut')
+
+for (i in session_type$Session[session_type$singe=="Homer" ]){
+HOMER_99$Injection[HOMER_99$session==i] <- session_type$Injection[session_type$singe=="Homer" & session_type$Session==i]
+HOMER_99$portes[HOMER_99$session==i] <- session_type$portes[session_type$singe=="Homer" & session_type$Session==i]
+}
+
+for (i in session_type$Session[session_type$singe=="Donut" ]){
+DONUT_99$Injection[DONUT_99$session==i] <- session_type$Injection[session_type$singe=="Donut" & session_type$Session==i]
+DONUT_99$portes[DONUT_99$session==i] <- session_type$portes[session_type$singe=="Donut" & session_type$Session==i]
+}
+
+
+HOMER_99$Injection <- as.factor(HOMER_99$Injection)
+DONUT_99$Injection <- as.factor(DONUT_99$Injection)
+
+HOMER_99$portes <- factor(HOMER_99$portes, levels = c("clear", "blue"))
+DONUT_99$portes <- factor(DONUT_99$portes, levels = c("clear", "blue"))
+
 
 ```
 
@@ -889,9 +914,61 @@ grid.arrange(g1,g2, ncol=2)
 
 ```
 
+## Pause in sessions
+
+Monkeys sometime break during the task for short (code 99) or long (code999) pauses. THere is an interest in looking at the number and distribution of these pauses, as they may reflect laps of attention, distractibility, lack of motivation, etc.
 
 
+```{r showLines, echo=FALSE,message=FALSE, warning=FALSE,fig.width=8, fig.height=5}
 
+Pause4R_99 <- rbind(HOMER_99, DONUT_99)
+
+short.pause <- subset(Pause4R_99, choice==99 & Injection !="no" & Injection !="0")
+
+a <- ggplot(short.pause, aes(x=Injection, y=trial_nb, fill=Injection))+
+    geom_boxplot()+
+  geom_point()+
+    facet_grid(.~singe*portes)+
+    scale_fill_manual(values=c("chartreuse3","grey"))+
+    ggtitle("Position of SHORT pauses during sessions (cod 99)")+
+  theme(axis.text.x = element_text(color = "grey20", size = 12))
+
+
+long.pause <- subset(Pause4R_99, choice==999 & Injection !="no" & Injection !="0")
+
+b <- ggplot(long.pause, aes(x=Injection, y=trial_nb, fill=Injection))+
+    geom_boxplot()+
+  geom_point()+
+    facet_grid(.~singe*portes)+
+    scale_fill_manual(values=c("chartreuse3","grey"))+
+    ggtitle("Position of LONG pauses during sessions (cod 999)")+
+  theme(axis.text.x = element_text(color = "grey20", size = 12))
+
+
+shortp <- aggregate(choice ~ session + singe + Injection + portes, data=short.pause, length)
+longp <- aggregate(choice ~ session + singe + Injection + portes, data=long.pause, length)
+
+c <- ggplot(shortp, aes(x=Injection, y=choice, fill=Injection))+
+    geom_boxplot()+
+  geom_point()+
+    facet_grid(. ~ singe*portes)+
+    scale_fill_manual(values=c("chartreuse3","grey"))+
+    ggtitle("Mean number of SHORT pauses during sessions (cod 99)")+
+  theme(axis.text.x = element_text(color = "grey20", size = 12))+
+  ylim(0,8)
+
+
+d <- ggplot(longp, aes(x=Injection, y=choice, fill=Injection))+
+    geom_boxplot()+
+  geom_point()+
+    facet_grid(. ~ singe*portes)+
+    scale_fill_manual(values=c("chartreuse3","grey"))+
+    ggtitle("Mean number of LONG pauses during sessions (cod 999)")+
+  theme(axis.text.x = element_text(color = "grey20", size = 12))
+
+grid.arrange(a, b, c, d)
+
+```
 
 ## Trial types:
 
