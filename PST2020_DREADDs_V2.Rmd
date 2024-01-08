@@ -805,10 +805,12 @@ In the first analysis we take only the "blue" sessions because we have very few 
 agg.maxrpt <- aggregate(trial_nb ~ singe + session + Injection , data = subset(data4B, choice_type=="Repeat" & portes=="blue"), max)
 agg.maxrpt$Injection <- factor(agg.maxrpt$Injection, levels = c("sham","DCZ"))
 
-ggplot(agg.maxrpt, aes(y=trial_nb, fill=Injection))+
+ggplot(agg.maxrpt, aes(x= Injection, y=trial_nb, fill=Injection))+
   geom_boxplot()+
+    geom_point(aes(colour=Injection), size=2)+
     facet_wrap(singe~., scales = "free")+
-    scale_fill_manual(values=c("grey","chartreuse3","dodgerblue1"))+
+    scale_fill_manual(values=c("grey","chartreuse3"))+
+  scale_colour_manual(values=c("grey50","chartreuse4"))+
     ggtitle("Last Repeat trial in sessions - only 'blue' sessions")+
   theme(axis.text.x = element_text(color = "grey20", size = 10))
 
