@@ -54,7 +54,7 @@ if (Sys.info()["nodename"] == "PC_MANU_ATIV9"){
 # load data
 #Ddata <- read_excel("C://Users/E Procyk/Dropbox/Main_drop/R/Diverse_stuff/PST2020/data.xlsx")
 
-data4R <- read.delim(paste0(path,"data4R_131221.txt")) # carefull to insert the header in the txt file: trial_nb	singe	session	choice	condition
+data4R <- read.delim(paste0(path,"data4R_080124.txt")) # carefull to insert the header in the txt file: trial_nb	singe	session	choice	condition
 map <- read.delim(paste0(path,"xy_loc.txt"))  # coordinate file for the 5x5 table
 session_type <- read.table(paste0(path,"session_type.txt"), header=TRUE) # session type formatted from the GoogleDrive file updated by Clemence
 ```
@@ -69,7 +69,7 @@ The animals were tested everyday with different versions of the apparatus.
 The testing was done in animal housing using the 1st design realized by JS:
 
 ```{r pressure, echo=FALSE,fig.align="center", fig.cap="PST 2020 board", out.width = '70%'}
-knitr::include_graphics(paste0(path,"Setup_JS2020.png"))
+#knitr::include_graphics(paste0(path,"Setup_JS2020.png"))
 ```
 On this board the 25 locations are numbered from *1* to *25* from the *upper left* corner to the *lower right* corner, going from left to right.
 
@@ -86,7 +86,7 @@ Codes used for target chosen and repeats or miss reflect the position of the cho
 
 [^n1]: The  first descriptive analyses were in Graph_PST2020choices.R - now in PST2020_DREADDs.rmd]
 
-
+!!!! ATTENTION : new data used on the 4.1.2024: there was a problem in the list of session for Homer, previous analyses for that monkey must not be considered.!!!!
 
 ```{r prepare,echo=FALSE}
 
@@ -553,12 +553,12 @@ There is obviously a lot of repeats (checks?) after 25 when the animals continue
    
    
 ```{r subset1b, echo=FALSE,  fig.height=5, fig.width=5, message=FALSE, warning=FALSE, include=TRUE}
-   ggplot(subset(data4B, choice_pos<0& Injection != "DCZ"), aes(trial_nb, colour=Injection))+
+   ggplot(subset(data4B, choice_pos<0 & Injection != "DCZ"), aes(trial_nb, colour=Injection))+
      geom_histogram(aes(fill=Injection), position="dodge", alpha=0.5)+
-     scale_fill_manual(values=c("chartreuse3","grey"))+
-     scale_colour_manual(values=c("chartreuse3","grey30"))+
+     scale_fill_manual(values=c("dodgerblue1","grey"))+
+     scale_colour_manual(values=c("dodgerblue1","grey30"))+
       geom_vline(xintercept = 25, colour="red")+
-     facet_grid(portes~singe)+
+     facet_grid(portes ~ singe)+   
      ggtitle("distribution of repeats in sessions - All trials (wthout DCZ)")
 
 ```
@@ -921,7 +921,7 @@ grid.arrange(g1,g2, ncol=2)
 Monkeys sometime break during the task for short (code 99) or long (code999) pauses. THere is an interest in looking at the number and distribution of these pauses, as they may reflect laps of attention, distractibility, lack of motivation, etc.
 
 
-```{r showLines, echo=FALSE,message=FALSE, warning=FALSE,fig.width=8, fig.height=5}
+```{r showLines2, echo=FALSE,message=FALSE, warning=FALSE,fig.width=8, fig.height=5}
 
 Pause4R_99 <- rbind(HOMER_99, DONUT_99)
 
@@ -1047,11 +1047,11 @@ ggplot(agg.data4B.after30, aes(x=as.factor(choice_type), y=trial   , fill=Inject
     ggtitle("All trials after 30")+
   theme(axis.text.x = element_text(color = "grey20", size = 12))
 
-hom.chtype.glm <- glm(trial ~ Injection * portes, family = "poisson", data=subset(agg.data4B.after30, singe=="Homer" & choice_type == "Repeat" ))
-summary(hom.chtype.glm)
-
-Don.chtype.glm <- glm(trial ~ Injection * portes , family = "poisson", data=subset(agg.data4B.after30, singe=="Donut" & choice_type == "Repeat"))
-summary(Don.chtype.glm)
+# hom.chtype.glm <- glm(trial ~ Injection * portes, family = "poisson", data=subset(agg.data4B.after30, singe=="Homer" & choice_type == "Repeat" ))
+# summary(hom.chtype.glm)
+# 
+# Don.chtype.glm <- glm(trial ~ Injection * portes , family = "poisson", data=subset(agg.data4B.after30, singe=="Donut" & choice_type == "Repeat"))
+# summary(Don.chtype.glm)
 ```
  
  
@@ -1083,7 +1083,7 @@ data4B$cv <- data4B$rwsum
 
 for (i in unique(data4B$singe)){
   for (ii in unique(data4B$session)){
-    data4B$cv[data4B$singe == i & data4B$session==ii] <- cumsum(data4B$cv[data4B$singe == i & data4B$session==ii] )
+    data4B$cv[data4B$singe == i & data4B$session==ii] = cumsum(data4B$cv[data4B$singe == i & data4B$session==ii] )
     
   }
 }
@@ -1378,7 +1378,7 @@ ggplot(data4B %>%
 
 
 for (i in unique(data4B$singe)){
-  for (ii in unique(data4B$session)){
+  for (ii in unique(data4B$session[data4B$singe==i])){
     data4B$distsum[data4B$singe == i & data4B$session==ii] <- cumsum(data4B$distloc[data4B$singe == i & data4B$session==ii] )
     
   }
