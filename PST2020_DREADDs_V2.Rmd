@@ -90,7 +90,8 @@ Codes used for target chosen and repeats or miss reflect the position of the cho
 
 ```{r prepare,echo=FALSE}
 
-# first thin g is to remove the 99 from the data and save that in a second data frame
+# first thing is to remove the 99
+#from the data and save that in a second data frame
 
 data4R_99 <- data4R # used for pause analyses
 data4R <- subset(data4R, data4R$choice!=99)
