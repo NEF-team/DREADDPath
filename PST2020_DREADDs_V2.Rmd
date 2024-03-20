@@ -782,7 +782,17 @@ agg.maxcor$Injection <- factor(agg.maxcor$Injection, levels = c( "sham","DCZ"))
 ggplot(agg.maxcor, aes(x=Injection,y=trial_nb, fill=Injection))+
   geom_boxplot()+
    geom_jitter(aes(colour=Injection), size=2,width = 0.1)+
-    facet_wrap(portes~singe)+
+    facet_grid(.~portes*singe)+
+    scale_fill_manual(values=c("grey","chartreuse3","dodgerblue1"))+
+  scale_colour_manual(values=c("grey40","chartreuse4","dodgerblue1"))+
+    ggtitle("Last correct trial in sessions")+
+  theme(axis.text.x = element_text(color = "grey20", size = 12))
+
+
+ggplot(subset(agg.maxcor, portes=='blue'), aes(x=Injection,y=trial_nb, fill=Injection))+
+  geom_boxplot()+
+   geom_jitter(aes(colour=Injection), size=2,width = 0.1)+
+    facet_grid(.~portes*singe)+
     scale_fill_manual(values=c("grey","chartreuse3","dodgerblue1"))+
   scale_colour_manual(values=c("grey40","chartreuse4","dodgerblue1"))+
     ggtitle("Last correct trial in sessions")+
@@ -791,7 +801,15 @@ ggplot(agg.maxcor, aes(x=Injection,y=trial_nb, fill=Injection))+
 ho.maxcor.glm <- glm(trial_nb ~ Injection * portes, family ="poisson", data=subset(agg.maxcor,singe=="Homer"))
 summary(ho.maxcor.glm)
 
+
+ho.maxcor.glm <- glm(trial_nb ~ Injection , family ="poisson", data=subset(agg.maxcor,singe=="Homer" & portes=="blue"))
+summary(ho.maxcor.glm)
+
+
 do.maxcor.glm <- glm(trial_nb ~ Injection * portes, family ="poisson", data=subset(agg.maxcor,singe=="Donut"))
+summary(do.maxcor.glm)
+
+do.maxcor.glm <- glm(trial_nb ~ Injection , family ="poisson", data=subset(agg.maxcor,singe=="Donut" & portes=="blue"))
 summary(do.maxcor.glm)
 
 ```
@@ -1026,8 +1044,10 @@ ggplot(agg.data4B, aes(x=as.factor(choice_type), y=trial   , fill=Injection))+
 
 ggplot(agg.data4B, aes(x=as.factor(portes), y=trial   , fill=Injection))+
     geom_boxplot()+
+  geom_jitter(aes(colour=Injection), position = position_jitterdodge(), size=2)+
     facet_grid(singe~choice_type)+
     scale_fill_manual(values=c("grey","chartreuse3","dodgerblue1"))+
+    scale_colour_manual(values=c("grey50","chartreuse4"))+
     ggtitle("All trials")+
   theme(axis.text.x = element_text(color = "grey20", size = 12))
 
@@ -1046,24 +1066,94 @@ summary(Don.chtype2.glm)
 #trials before 30
 
 
-
 agg.data4B.first30 <- aggregate(trial ~ Injection + choice_type + session + portes + singe, data=subset(data4B, trial_nb<30), sum)
 agg.data4B.first30$Injection <- factor(agg.data4B.first30$Injection, levels = c("0", "no", "sham","DCZ"))
 
-ggplot(agg.data4B.first30, aes(x=as.factor(portes), y=trial   , fill=Injection))+
+
+ggplot(agg.data4B.first30, aes(x=as.factor(portes), y=trial, fill=Injection))+
     geom_boxplot()+
+   geom_jitter(aes(colour=Injection), position = position_jitterdodge(), size=2)+
     facet_grid(singe~choice_type)+
-    scale_fill_manual(values=c("grey","chartreuse3","dodgerblue1"))+
+    scale_fill_manual(values=c("grey","chartreuse3","dodgerblue1"))+   
+  scale_colour_manual(values=c("grey50","chartreuse4"))+
     ggtitle("All trials before 30")+
   theme(axis.text.x = element_text(color = "grey20", size = 12))
 
-hom.chtype.glm <- glm(trial ~ Injection * portes, family = "poisson", data=subset(agg.data4B.first30, singe=="Homer" & choice_type == "Repeat" ))
-summary(hom.chtype.glm)
 
-Don.chtype.glm <- glm(trial ~ Injection * portes , family = "poisson", data=subset(agg.data4B.first30, singe=="Donut" & choice_type == "Repeat"))
+# extract data to geom point par session : e.g. Repat against Correct
+xyplot_data <- cbind(subset(agg.data4B,choice_type=="Correct" & portes =="blue"), subset(agg.data4B, choice_type=="Repeat"& portes =="blue"))
+
+names(xyplot_data) <- c("Injection","Correct", "session","portes","singe","Correct_trials",
+                        "Injection1","Repeat", "session1","portes1","singe1","Repeat_trials")
+
+ggplot(xyplot_data, aes(x=Correct_trials, y=Repeat_trials, fill=Injection))+
+  geom_point(aes(colour=Injection), size=4)+
+  facet_grid(portes~singe)+
+scale_fill_manual(values=c("grey","chartreuse3","dodgerblue1"))+   
+  scale_colour_manual(values=c("grey20","chartreuse4"))+
+    ggtitle("All trials ")+
+  theme(axis.text.x = element_text(color = "grey20", size = 12))
+
+
+
+xyplot_data.first30 <- cbind(subset(agg.data4B.first30,choice_type=="Correct" & portes =="blue"), subset(agg.data4B.first30, choice_type=="Repeat"& portes =="blue"))
+
+names(xyplot_data.first30) <- c("Injection","Correct", "session","portes","singe","Correct_trials",
+                        "Injection1","Repeat", "session1","portes1","singe1","Repeat_trials")
+
+ggplot(xyplot_data.first30, aes(x=Correct_trials, y=Repeat_trials, fill=Injection))+
+  geom_point(aes(colour=Injection), size=4)+
+  geom_smooth(aes(colour=Injection),method=lm, se=FALSE)+
+  facet_grid(portes~singe)+
+scale_fill_manual(values=c("grey","chartreuse3","dodgerblue1"))+   
+  xlim(0,30)+ ylim(0,30)+
+  scale_colour_manual(values=c("grey20","chartreuse4"))+
+    ggtitle("First 30 trials")+
+  theme(axis.text.x = element_text(color = "grey20", size = 12))
+
+
+#--------stats all trials------------
+hom.chtypeCor.glm <- glm(trial ~ Injection * portes, family = "poisson", data=subset(agg.data4B, singe=="Homer" & choice_type == "Correct" ))
+summary(hom.chtypeRep.glm)
+
+Don.chtypeCor.glm <- glm(trial ~ Injection * portes , family = "poisson", data=subset(agg.data4B, singe=="Donut" & choice_type == "Correct"))
+summary(Don.chtypeRep.glm)
+
+hom.chtypeCor.glm <- glm(trial ~ Injection , family = "poisson", data=subset(agg.data4B, singe=="Homer" & choice_type == "Repeat" & portes =="blue"))
+summary(hom.chtypeRep.glm)
+
+Don.chtypeCor.glm <- glm(trial ~ Injection  , family = "poisson", data=subset(agg.data4B, singe=="Donut" & choice_type == "Repeat"& portes =="blue"))
+summary(Don.chtypeRep.glm)
+
+#--------stats first 30------------
+
+
+hom.chtypeM.glm <- glm(trial ~ Injection * portes, family = "poisson", data=subset(agg.data4B.first30, singe=="Homer" & choice_type == "Miss" ))
+summary(hom.chtypeM.glm)
+
+Don.chtypeM.glm <- glm(trial ~ Injection * portes , family = "poisson", data=subset(agg.data4B.first30, singe=="Donut" & choice_type == "Miss"))
+summary(Don.chtypeM.glm)
+
+hom.chtypeRep.glm <- glm(trial ~ Injection * portes, family = "poisson", data=subset(agg.data4B.first30, singe=="Homer" & choice_type == "Correct" ))
+summary(hom.chtypeRep.glm)
+
+Don.chtypeRep.glm <- glm(trial ~ Injection * portes , family = "poisson", data=subset(agg.data4B.first30, singe=="Donut" & choice_type == "Correct"))
+summary(Don.chtypeRep.glm)
+
+hom.chtypeRep.glm <- glm(trial ~ Injection * portes, family = "poisson", data=subset(agg.data4B.first30, singe=="Homer" & choice_type == "Repeat" ))
+summary(hom.chtypeRep.glm)
+
+Don.chtypeRep.glm <- glm(trial ~ Injection * portes , family = "poisson", data=subset(agg.data4B.first30, singe=="Donut" & choice_type == "Repeat"))
+summary(Don.chtypeRep.glm)
+  
+hom.chtype.glm <- glm(trial ~ Injection * portes * choice_type, family = "poisson", data=subset(agg.data4B.first30, singe=="Homer" ))
+summary(hom.chtype.glm)
+  
+Don.chtype.glm <- glm(trial ~ Injection * portes* choice_type, family = "poisson", data=subset(agg.data4B.first30, singe=="Homer" ))
 summary(Don.chtype.glm)
-  
-  
+
+
+
 
 agg.data4B.after30 <- aggregate(trial ~ Injection + choice_type + session + portes + singe, data=subset(data4B, trial_nb>30), sum)
 agg.data4B.after30$Injection <- factor(agg.data4B.after30$Injection, levels = c("0", "no", "sham","DCZ"))
@@ -1465,6 +1555,19 @@ ggplot(mean.nextdist, aes(choice_type, y=nextdist, fill=Injection))+
   scale_colour_manual(values=c("grey60","chartreuse4"))+
   ggtitle("Distance of the next choice \n after positive or negative outcomes")
 
+ggplot(subset(mean.nextdist, portes=="blue"), aes(choice_type, y=nextdist, fill=Injection))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_point(aes(colour=Injection), position = position_jitterdodge())+
+  facet_grid(singe~portes*Injection)+
+  ylim(5,18)+
+  ylab('Distance to next choice (cm)')+
+  scale_fill_manual(values=c("grey30","chartreuse3"))+
+  scale_colour_manual(values=c("grey60","chartreuse4"))+
+  ggtitle("Distance of the next choice \n after positive or negative outcomes")
+
+
+
+
 ggplot(mean.nextdist, aes(Injection, y=nextdist, fill=Injection))+
   geom_boxplot(outlier.shape = NA)+
   geom_point(aes(colour=Injection), position = position_jitterdodge())+
@@ -1537,6 +1640,15 @@ summary(lm.nextdist.Do)
 
 
 lm.nextdist.Ho <- lm(nextdist ~ Injection * portes * choice_type , subset(mean.nextdist, singe == "Homer"))
+summary(lm.nextdist.Ho)
+
+
+
+lm.nextdist.Do <- lm(nextdist ~ Injection *  choice_type , subset(mean.nextdist, singe == "Donut" & portes =="blue"))
+summary(lm.nextdist.Do)
+
+
+lm.nextdist.Ho <- lm(nextdist ~ Injection  * choice_type , subset(mean.nextdist, singe == "Homer" & portes =="blue"))
 summary(lm.nextdist.Ho)
 
 ```
