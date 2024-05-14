@@ -57,6 +57,15 @@ if (Sys.info()["nodename"] == "PC_MANU_ATIV9"){
 data4R <- read.delim(paste0(path,"data4R_080124.txt")) # carefull to insert the header in the txt file: trial_nb	singe	session	choice	condition
 map <- read.delim(paste0(path,"xy_loc.txt"))  # coordinate file for the 5x5 table
 session_type <- read.table(paste0(path,"session_type.txt"), header=TRUE) # session type formatted from the GoogleDrive file updated by Clemence
+
+
+#Direct loading if already in path... Added CREW May 24
+#data4R <- read.delim("data4R_080124.txt") # carefull to insert the header in the txt file: trial_nb	singe	session	choice	condition
+#map <- read.delim("xy_loc.txt")  # coordinate file for the 5x5 table
+#session_type <- read.table("session_type.txt", header=TRUE) # session type formatted from the GoogleDrive file updated by Clemence
+
+
+
 ```
 
 
